@@ -1,0 +1,51 @@
+package com.mediaocean.bi.cmdw.sync.mmp;
+
+import com.google.gson.Gson;
+import com.mediaocean.bi.cmdw.sync.mmp.service.IncrementPlanProcessing;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.amqp.AmqpRejectAndDontRequeueException;
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Component;
+
+import javax.inject.Inject;
+import java.util.UUID;
+import java.util.stream.Collectors;
+
+@Component("planMessageConsumer")
+@Profile("background")
+public class PlanMessageConsumer {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PlanMessageConsumer.class);
+
+    @Inject
+    private IncrementPlanProcessing planProcessing;
+
+    public void receiveMessage(byte[] message) throws Exception {
+        PlanProcessPayLoad requestPayLoad = null;
+        String messageJson;
+        try {
+            requestPayLoad = getPlanProcessPayLoad(message, requestPayLoad);
+
+            LOG.info("Successfully Processed Site: {}, Plans: {}", requestPayLoad.getSite().getName(),
+                    requestPayLoad.getPlankeys().stream().collect(Collectors.joining(",")));
+        } catch (AmqpRejectAndDontRequeueException e) {
+            planProcessing.processPlanProcessingFailure(requestPayLoad);
+            LOG.info("receiveMessage : UPDATE_PLAN_PROCESS_FAILURE for site {} and plan {} ", requestPayLoad.getSite().getName(), requestPayLoad.getPlankeys().get(0));
+            throw e;
+        }
+    }
+
+    public PlanProcessPayLoad getPlanProcessPayLoad(byte[] message, PlanProcessPayLoad requestPayLoad) {
+        String messageJson;
+        String messageKey = UUID.randomUUID().toString();
+        messageJson = new String(message);
+        Gson gsonObj = new Gson();
+        requestPayLoad = gsonObj.fromJson(messageJson, PlanProcessPayLoad.class);
+        LOG.info("Started Processing Site: {}, Plans: {}", requestPayLoad.getSite().getName(),
+                requestPayLoad.getPlankeys().stream().collect(Collectors.joining(",")));
+
+        planProcessing.planProcess(requestPayLoad, messageKey, requestPayLoad.getLogFileName());
+        return requestPayLoad;
+    }
+}
