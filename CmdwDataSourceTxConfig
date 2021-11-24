@@ -1,0 +1,28 @@
+package com.mediaocean.bi.cmdw.sync.configuration;
+
+import com.mediaocean.bi.cmdw.sync.mmp.constants.Constants;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.jdbc.datasource.DataSourceTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
+
+import javax.annotation.Resource;
+import javax.sql.DataSource;
+
+//@Configuration
+//@ConfigurationProperties("spring.datasource.cmdw")
+public class CmdwDataSourceTxConfig { // NOSONAR
+
+    @Resource(name = "cmdwDataSource")
+    private DataSource dataSource;
+
+    @Bean(name = Constants.TransactionManagers.CMDW)
+    DataSourceTransactionManager transactionManager() {
+        return new DataSourceTransactionManager(dataSource);
+    }
+
+    @Bean
+    TransactionTemplate transactionTemplate(DataSourceTransactionManager transactionManager) {
+        return new TransactionTemplate(transactionManager);
+    }
+}
