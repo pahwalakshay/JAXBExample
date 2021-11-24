@@ -1,0 +1,215 @@
+package com.mediaocean.bi.cmdw.sync.mmp;
+
+import com.mediaocean.bi.cmdw.sync.mmp.external.PlanRevisionDTO;
+import com.mediaocean.bi.cmdw.sync.mmp.external.percentallocation.ConfigurationDTO;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+public class PlanProcessPayLoad {
+
+    Set<PlanRevisionDTO> planRevisionsToProcess;
+    Map<String, List<String>> excludeRelatedFields;
+    Map<String, Integer> lengthAdjustableFields;
+    private List<String> plankeys;
+    private Set<String> toUpdateIslatestPlanIdAndRevision;
+    private Set<String> toUpdateIsPinnedRevisionPlanIds;
+    private Set<String> toRevertIslatestPlanIds;
+    private Set<String> toRevertIsPinnedPlanIds;
+    private Set<String> tobeDeletedPlanRevisions;
+    private SiteConfiguration site;
+    private String logFileName;
+    private String logFileTimeStamp;
+    private long incrementStartTime;
+    private boolean fullLoad;
+    private String latestRevision;
+    private ConfigurationDTO configDTO;
+    private int fieldValueFlagCount;
+    private boolean fullPlanProcessingEnable;
+    private boolean planProcessingFromQueue;
+    private String siteCurrency;
+    private boolean isMultipleCurrencyEnabled;
+
+    public Map<String, Integer> getLengthAdjustableFields() {
+        return lengthAdjustableFields;
+    }
+
+    public void setLengthAdjustableFields(Map<String, Integer> lengthAdjustableFields) {
+        this.lengthAdjustableFields = lengthAdjustableFields;
+    }
+
+    public boolean isPlanProcessingFromQueue() {
+        return planProcessingFromQueue;
+    }
+
+    public void setPlanProcessingFromQueue(boolean planProcessingFromQueue) {
+        this.planProcessingFromQueue = planProcessingFromQueue;
+    }
+
+    public boolean isFullPlanProcessingEnable() {
+        return fullPlanProcessingEnable;
+    }
+
+    public void setFullPlanProcessingEnable(boolean fullPlanProcessingEnable) {
+        this.fullPlanProcessingEnable = fullPlanProcessingEnable;
+    }
+
+    public int getFieldValueFlagCount() {
+        return fieldValueFlagCount;
+    }
+
+    public void setFieldValueFlagCount(int fieldValueFlagCount) {
+        this.fieldValueFlagCount = fieldValueFlagCount;
+    }
+
+    public ConfigurationDTO getConfigDTO() {
+        return configDTO;
+    }
+
+    public void setConfigDTO(ConfigurationDTO configDTO) {
+        this.configDTO = configDTO;
+    }
+
+    public String getLatestRevision() {
+        return latestRevision;
+    }
+
+    public void setLatestRevision(String latestRevision) {
+        this.latestRevision = latestRevision;
+    }
+
+    public boolean getIsMultipleCurrencyEnabled() {
+        return isMultipleCurrencyEnabled;
+    }
+
+    public void setIsMultipleCurrencyEnabled(boolean isMultipleCurrencyEnabled) {
+        this.isMultipleCurrencyEnabled = isMultipleCurrencyEnabled;
+    }
+
+    public boolean isFullLoad() {
+        return fullLoad;
+    }
+
+    public void setFullLoad(boolean fullLoad) {
+        this.fullLoad = fullLoad;
+    }
+
+    public Map<String, List<String>> getExcludeRelatedFields() {
+        return excludeRelatedFields;
+    }
+
+    public void setExcludeRelatedFields(Map<String, List<String>> excludeRelatedFields) {
+        this.excludeRelatedFields = excludeRelatedFields;
+    }
+
+    public String getLogFileTimeStamp() {
+        return logFileTimeStamp;
+    }
+
+    public void setLogFileTimeStamp(String logFileTimeStamp) {
+        this.logFileTimeStamp = logFileTimeStamp;
+    }
+
+    public long getIncrementStartTime() {
+        return incrementStartTime;
+    }
+
+    public void setIncrementStartTime(long incrementStartTime) {
+        this.incrementStartTime = incrementStartTime;
+    }
+
+    public String getLogFileName() {
+        return logFileName;
+    }
+
+    public void setLogFileName(String logFileName) {
+        this.logFileName = logFileName;
+    }
+
+    public Set<PlanRevisionDTO> getPlanRevisionsToProcess() {
+        return planRevisionsToProcess;
+    }
+
+    public void setPlanRevisionsToProcess(Set<PlanRevisionDTO> planRevisionsToProcess) {
+        this.planRevisionsToProcess = planRevisionsToProcess;
+    }
+
+    public List<String> getPlankeys() {
+        return plankeys;
+    }
+
+    public void setPlankeys(List<String> plankeys) {
+        this.plankeys = plankeys;
+    }
+
+    public Set<String> getToUpdateIslatestPlanIdAndRevision() {
+        return toUpdateIslatestPlanIdAndRevision;
+    }
+
+    public void setToUpdateIslatestPlanIdAndRevision(Set<String> toUpdateIslatestPlanIdAndRevision) {
+        this.toUpdateIslatestPlanIdAndRevision = toUpdateIslatestPlanIdAndRevision;
+    }
+
+    public Set<String> getToUpdateIsPinnedRevisionPlanIds() {
+        return toUpdateIsPinnedRevisionPlanIds;
+    }
+
+    public void setToUpdateIsPinnedRevisionPlanIds(Set<String> toUpdateIsPinnedRevisionPlanIds) {
+        this.toUpdateIsPinnedRevisionPlanIds = toUpdateIsPinnedRevisionPlanIds;
+    }
+
+    public Set<String> getToRevertIslatestPlanIds() {
+        return toRevertIslatestPlanIds;
+    }
+
+    public void setToRevertIslatestPlanIds(Set<String> toRevertIslatestPlanIds) {
+        this.toRevertIslatestPlanIds = toRevertIslatestPlanIds;
+    }
+
+    public Set<String> getToRevertIsPinnedPlanIds() {
+        return toRevertIsPinnedPlanIds;
+    }
+
+    public void setToRevertIsPinnedPlanIds(Set<String> toRevertIsPinnedPlanIds) {
+        this.toRevertIsPinnedPlanIds = toRevertIsPinnedPlanIds;
+    }
+
+    public Set<String> getTobeDeletedPlanRevisions() {
+        return tobeDeletedPlanRevisions;
+    }
+
+    public void setTobeDeletedPlanRevisions(Set<String> tobeDeletedPlanRevisions) {
+        this.tobeDeletedPlanRevisions = tobeDeletedPlanRevisions;
+    }
+
+    public SiteConfiguration getSite() {
+        return site;
+    }
+
+    public void setSite(SiteConfiguration site) {
+        this.site = site;
+    }
+
+    public String getSiteCurrency() {
+        return siteCurrency;
+    }
+
+    public void setSiteCurrency(String siteCurrency) {
+        this.siteCurrency = siteCurrency;
+    }
+
+    @Override
+    public String toString() {
+        return "PlanProcessPayLoad [configDTO=" + configDTO + ", excludeRelatedFields=" + excludeRelatedFields
+                + ", fieldValueFlagCount=" + fieldValueFlagCount + ", fullLoad=" + fullLoad
+                + ", fullPlanProcessingEnable=" + fullPlanProcessingEnable + ", incrementStartTime="
+                + incrementStartTime + ", latestRevision=" + latestRevision + ", logFileName=" + logFileName
+                + ", logFileTimeStamp=" + logFileTimeStamp + ", plankeys=" + plankeys + ", planRevisionsToProcess="
+                + planRevisionsToProcess + ", site=" + site + ", tobeDeletedPlanRevisions=" + tobeDeletedPlanRevisions
+                + ", toRevertIslatestPlanIds=" + toRevertIslatestPlanIds + ", toRevertIsPinnedPlanIds="
+                + toRevertIsPinnedPlanIds + ", toUpdateIslatestPlanIdAndRevision=" + toUpdateIslatestPlanIdAndRevision
+                + ", toUpdateIsPinnedRevisionPlanIds=" + toUpdateIsPinnedRevisionPlanIds + "]";
+    }
+
+}
