@@ -1,0 +1,168 @@
+package com.mediaocean.bi.cmdw.sync.util;
+
+import java.sql.SQLException;
+
+import oracle.ucp.jdbc.PoolDataSource;
+import oracle.ucp.jdbc.PoolDataSourceFactory;;
+
+
+public class OracleUCPDataSourceFactory {
+    private static final String PROGRAM_NAME = "v$session.program";
+	private static final String PROCESS_NAME = "v$session.process";
+    String url;
+    String username;
+    String password;
+    String connectionFactoryClassName;
+    int connectionWaitTimeout;
+    int inactiveConnectionTimeout;
+    int initialPoolSize;
+    int minPoolSize;
+    int maxPoolSize;
+    int maxStatements;
+    Boolean validateConnectionOnBorrow;
+    String host;
+    String service;
+    String programName;
+    String processName;
+
+    public PoolDataSource createPoolDataSource() throws SQLException {
+        PoolDataSource poolDataSource = PoolDataSourceFactory.getPoolDataSource();
+        poolDataSource.setURL(this.url);
+        poolDataSource.setUser(this.username);
+        poolDataSource.setPassword(this.password);
+        poolDataSource.setConnectionFactoryClassName(this.connectionFactoryClassName);
+        poolDataSource.setConnectionWaitTimeout(this.connectionWaitTimeout);
+        poolDataSource.setInactiveConnectionTimeout(this.inactiveConnectionTimeout);
+        poolDataSource.setInitialPoolSize(this.initialPoolSize);
+        poolDataSource.setMinPoolSize(this.minPoolSize);
+        poolDataSource.setMaxPoolSize(this.maxPoolSize);
+        poolDataSource.setConnectionProperty(OracleUCPDataSourceFactory.PROGRAM_NAME, programName);
+		poolDataSource.setConnectionProperty(OracleUCPDataSourceFactory.PROCESS_NAME, processName);
+        poolDataSource.setValidateConnectionOnBorrow(this.validateConnectionOnBorrow);
+        return poolDataSource;
+    }
+
+	public OracleUCPDataSourceFactory() {
+		
+	}
+
+	public String getUrl() {
+		return url;
+	}
+
+	public void setUrl(String url) {
+		this.url = url;
+	}
+
+	public String getUsername() {
+		return username;
+	}
+
+	public void setUsername(String username) {
+		this.username = username;
+	}
+
+	public String getPassword() {
+		return password;
+	}
+
+	public void setPassword(String password) {
+		this.password = password;
+	}
+
+	public String getConnectionFactoryClassName() {
+		return connectionFactoryClassName;
+	}
+
+	public void setConnectionFactoryClassName(String connectionFactoryClassName) {
+		this.connectionFactoryClassName = connectionFactoryClassName;
+	}
+
+	public int getConnectionWaitTimeout() {
+		return connectionWaitTimeout;
+	}
+
+	public void setConnectionWaitTimeout(int connectionWaitTimeout) {
+		this.connectionWaitTimeout = connectionWaitTimeout;
+	}
+
+	public int getInactiveConnectionTimeout() {
+		return inactiveConnectionTimeout;
+	}
+
+	public void setInactiveConnectionTimeout(int inactiveConnectionTimeout) {
+		this.inactiveConnectionTimeout = inactiveConnectionTimeout;
+	}
+
+	public int getInitialPoolSize() {
+		return initialPoolSize;
+	}
+
+	public void setInitialPoolSize(int initialPoolSize) {
+		this.initialPoolSize = initialPoolSize;
+	}
+
+	public int getMinPoolSize() {
+		return minPoolSize;
+	}
+
+	public void setMinPoolSize(int minPoolSize) {
+		this.minPoolSize = minPoolSize;
+	}
+
+	public int getMaxPoolSize() {
+		return maxPoolSize;
+	}
+
+	public void setMaxPoolSize(int maxPoolSize) {
+		this.maxPoolSize = maxPoolSize;
+	}
+
+	public int getMaxStatements() {
+		return maxStatements;
+	}
+
+	public void setMaxStatements(int maxStatements) {
+		this.maxStatements = maxStatements;
+	}
+
+	public Boolean getValidateConnectionOnBorrow() {
+		return validateConnectionOnBorrow;
+	}
+
+	public void setValidateConnectionOnBorrow(Boolean validateConnectionOnBorrow) {
+		this.validateConnectionOnBorrow = validateConnectionOnBorrow;
+	}
+
+	public String getHost() {
+		return host;
+	}
+
+	public void setHost(String host) {
+		this.host = host;
+	}
+
+	public String getService() {
+		return service;
+	}
+
+	public void setService(String service) {
+		this.service = service;
+	}
+
+	public String getProgramName() {
+		return programName;
+	}
+
+	public void setProgramName(String programName) {
+		this.programName = programName;
+	}
+
+	public String getProcessName() {
+		return processName;
+	}
+
+	public void setProcessName(String processName) {
+		this.processName = processName;
+	}
+}
