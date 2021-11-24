@@ -1,0 +1,52 @@
+package com.mediaocean.bi.cmdw.sync.mmp.amqp;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Component;
+
+
+@Component
+@Profile("docker")
+public class PlanMessagePublisher {
+	private static final Logger log = LoggerFactory.getLogger(PlanMessagePublisher.class);
+	private static final Object instanceCouterLock = new Object();
+
+	private RabbitTemplate rabbitTemplate;
+	private String exchange;
+	private String keyPrefix;
+	private int threadScaling;
+	private int threadInstance;
+	
+	@Autowired
+	public PlanMessagePublisher(RabbitTemplate rabbitTemplate, @Value(RabbitConfiguration.PLAN_EXCHANGE_PROP_NAME) String exchange, @Value(RabbitConfiguration.PLAN_QUEUE_RK_PREFIX) String keyPrefix, @Value(RabbitConfiguration.PLAN_THREAD_SCALING) int threadScaling) {
+		this.rabbitTemplate=rabbitTemplate;
+		this.exchange=exchange;
+		this.threadScaling=threadScaling;
+		this.keyPrefix=keyPrefix;
+	}
+	
+	public void publish(Object data) {
+		log.trace("send plan to the queue Message= {}", data);
+		//Send the messages to all bg-processes on round robin basis.
+		rabbitTemplate.convertAndSend(this.exchange,  getNextKey(), data);
+		log.trace("The message has been sent to the queue.");
+	}
+
+	private String getNextKey() {
+		return keyPrefix + getNextThreadInstance();
+	}
+	
+	private int getNextThreadInstance() {
+		synchronized (instanceCouterLock) {
+			this.threadInstance = this.threadInstance+1;
+			if (this.threadInstance > threadScaling) {
+				this.threadInstance=1;
+			}
+		}
+		return this.threadInstance;
+	}
+}
