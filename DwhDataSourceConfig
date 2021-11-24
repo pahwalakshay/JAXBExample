@@ -1,0 +1,31 @@
+package com.mediaocean.bi.cmdw.sync.configuration.mmp;
+
+import java.sql.SQLException;
+
+import javax.sql.DataSource;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
+import org.springframework.context.annotation.Scope;
+
+import com.mediaocean.bi.cmdw.sync.util.OracleUCPDataSourceFactory;
+
+@Configuration
+public class DwhDataSourceConfig { // NOSONAR
+    @Bean(name="dwhDataSourceProperties")
+    @Scope("prototype")
+    @ConfigurationProperties(prefix = "dwh.datasource")
+    public OracleUCPDataSourceFactory mmpDataSourceProperties() {
+        return new OracleUCPDataSourceFactory();
+    }
+ 
+    @Bean(name = "dwhDataSource")
+    @DependsOn(value = { "dwhDataSourceProperties" })
+    public DataSource datasource(@Qualifier("dwhDataSourceProperties") OracleUCPDataSourceFactory dataSourceFactory) throws SQLException {
+        return dataSourceFactory.createPoolDataSource();
+    }
+
+}
