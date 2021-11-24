@@ -1,0 +1,227 @@
+package com.mediaocean.bi.cmdw.sync.mmp;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.stream.Collectors;
+
+import javax.inject.Inject;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Component;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.util.UriComponentsBuilder;
+
+import com.mediaocean.bi.cmdw.sync.mmp.constants.Constants;
+
+@Component
+public class MMPProxyService {
+
+	private static final String SUPPRESSDEFAULTALLOCATIONS = "suppressdefaultallocations";
+
+	private static final String SUPPRESSNULL = "suppressnull";
+
+	private static final String SUPPRESSTYPE = "suppresstype";
+
+	private static final String TRUE = "true";
+
+	private static final String MO_SERVICE_NAME = "mo-service-name";
+
+	private Logger LOG = LoggerFactory.getLogger(MMPProxyService.class);
+
+	@Inject
+	private RestTemplate restTemplate;
+
+	@Value("${mmp.api.mediaplan:/api-int/MediaPlan/}")
+	private String mediaPlanPath;
+
+	@Value("${mmp.api.fieldvalue:/api-int/FieldValues/}")
+	private String fieldValuePath;
+
+	@Value("${mmp.api.documentdefvalue:/api-int/DocumentDefinitions/}")
+	private String docDefinitionsPath;
+
+	@Value("${mmp.api.lookup:/api-int/LookUp/}")
+	private String lookupPath;
+
+
+	@Value("${mmp.api.documentdefvalue:/api-int/fieldDefinitions/}")
+	private String fieldDefinitionsPath;
+
+	@Value("${mmp.api.documentdefvalue:/api-int/users/}")
+	private String usersPath;
+
+	@Value("${mmp.api.documentdefvalue:/api-int/currencyexchangeset/}")
+	private String currencyExchangeSetPath;
+
+	@Value("${mmp.api.documentdefvalue:/api-int/customerconfig/}")
+	private String customerConfigsPath;
+
+	@Value("${authentication.header.key:NA}")
+	private String headerAuthKey;
+
+	@Value("${mmp.service.context}")
+	private String SERVICE_CONTEXT_NAME;
+
+	@Value("${mmp.suppressfeature.enable:true}")
+	private String suppressFeatureEnable;
+
+
+
+	InputStream getMediaPlans(SiteConfiguration site, String planId) {
+	    String url = site.getUrl() + mediaPlanPath + planId;
+	    boolean suppressFeature=suppressFeatureEnable.equalsIgnoreCase(TRUE)?true:false;
+	    return get(url,suppressFeature);
+	}
+
+
+	InputStream getMediaPlans(SiteConfiguration site, Long lastModified, boolean runFullLoad) {
+		String url = site.getUrl() + mediaPlanPath;
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url)
+                .queryParam("modifiedSince", DateTimeFormatter.ISO_DATE_TIME.format(Instant.ofEpochMilli(lastModified).atOffset(ZoneOffset.UTC)));
+        return runFullLoad ? get(url,false) : get(builder.toUriString(),false);
+	}
+
+	public InputStream getMediaPlansSummary(SiteConfiguration site, Long lastModified, boolean runFullLoad) {
+		LOG.info("Getting media plans summary without plan id for site: "+ site.getName());
+		String url = site.getUrl() + mediaPlanPath;
+		UriComponentsBuilder baseBuilder = UriComponentsBuilder.fromHttpUrl(url).queryParam("detaillevel", Constants.SUMMARY);
+		return get(baseBuilder.toUriString(),false);
+	}
+
+	public InputStream getDeletedMediaPlans(SiteConfiguration site) {
+		LOG.info("Getting deleted media plans for site: " + site.getName());
+		String url = site.getUrl() + mediaPlanPath;
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url)
+                .queryParam("activeState", "Deleted");
+        return get(builder.toUriString(),false);
+	}
+
+	InputStream getFieldValues(SiteConfiguration site, long lastModified) {
+		LOG.info("Getting Field Values(Incremental) for site: " + site.getName());
+        String url = site.getUrl() + fieldValuePath;
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url)
+                .queryParam("modifiedSince", DateTimeFormatter.ISO_DATE_TIME.format(Instant.ofEpochMilli(lastModified).atOffset(ZoneOffset.UTC)));
+        return get(builder.toUriString(),false);
+    }
+
+	public InputStream getFieldValues(SiteConfiguration site) {
+		LOG.info("Getting Field Values(Full) for site: " + site.getName());
+        String url = site.getUrl() + fieldValuePath;
+        return get(url,false);
+    }
+
+	public InputStream getFieldValue(SiteConfiguration site,String id) {
+		LOG.info("Getting Field Values(update) for site: " + site.getName());
+        String url = site.getUrl() + fieldValuePath+id;
+        return get(url,false);
+    }
+
+	public InputStream getDocDefinitionDetails(SiteConfiguration site) {
+		LOG.info("Getting docDefinition details for site: " + site.getName());
+        String url = site.getUrl() + docDefinitionsPath;
+        return get(url,false);
+	}
+
+	public InputStream getDocDefinitionDetails(SiteConfiguration site, long lastModified) {
+		LOG.info("Getting docDefinition details (incremental) for site: " + site.getName());
+        String url = site.getUrl() + docDefinitionsPath;
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url)
+                .queryParam("modifiedSince", DateTimeFormatter.ISO_DATE_TIME.format(Instant.ofEpochMilli(lastModified).atOffset(ZoneOffset.UTC)));
+        return get(builder.toUriString(),false);
+    }
+
+
+	public InputStream getLookupIds(SiteConfiguration site, Long lastModified, boolean runFullLoad) {
+		LOG.debug("Getting lookup ids for site: "+ site.getName());
+		String url = site.getUrl() + lookupPath;
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url)
+                .queryParam("full","false");
+        if(!runFullLoad) {
+        	builder=builder.queryParam("modifiedSince", DateTimeFormatter.ISO_DATE_TIME.format(Instant.ofEpochMilli(lastModified).atOffset(ZoneOffset.UTC)));
+        }
+        return get(builder.toUriString(),false);
+	}
+
+	public InputStream getDeleteLookupDetails(SiteConfiguration site, long lastModified) {
+		LOG.info("Getting delete Lookup details(Incremental) for site: " + site.getName());
+        String url = site.getUrl() + lookupPath;
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url)
+                .queryParam("modifiedSince", DateTimeFormatter.ISO_DATE_TIME.format(Instant.ofEpochMilli(lastModified).atOffset(ZoneOffset.UTC)))
+                .queryParam("activeState", "Deleted");
+        return get(builder.toUriString(),false);
+    }
+
+	InputStream getFieldDefinitionDetails(SiteConfiguration site) {
+		LOG.info("Getting field definition details for site: " + site.getName());
+        String url = site.getUrl() + fieldDefinitionsPath;
+        return get(url,false);
+    }
+
+	InputStream getUsers(SiteConfiguration site) {
+		LOG.info("Getting users for site: " + site.getName());
+		String url = site.getUrl() + usersPath;
+		return get(url,false);
+	}
+
+	public InputStream getCurrencyExchangeRates(SiteConfiguration site) {
+		LOG.info("Getting currency exchange rates for site: " + site.getName());
+		String url = site.getUrl() + currencyExchangeSetPath;
+		return get(url,false);
+    }
+
+	public InputStream getCustomerConfigs(SiteConfiguration site) {
+		LOG.info("Getting customer configs for site: " + site.getName());
+        String url = site.getUrl() + customerConfigsPath;
+        return get(url,false);
+	}
+
+    private InputStream get(String url,boolean isIncludeQueryParam){
+        final String SYSTEM_KEY = "Colspace1!";
+        HttpHeaders headers = new HttpHeaders();
+        if (!("NA".equals(headerAuthKey))) {
+            headers.set("X-MMP-ApiAccessKey", headerAuthKey);
+        }
+        headers.add(MO_SERVICE_NAME, SERVICE_CONTEXT_NAME);
+        HttpEntity entity = new HttpEntity(headers);
+        UriComponentsBuilder builder = UriComponentsBuilder.fromHttpUrl(url).queryParam("key", SYSTEM_KEY);
+        if(isIncludeQueryParam)
+        {
+        	builder=builder.queryParam(SUPPRESSTYPE, TRUE).queryParam(SUPPRESSNULL, TRUE).queryParam(SUPPRESSDEFAULTALLOCATIONS, TRUE);
+        }
+        try {
+            ResponseEntity<Resource> responseEntity = restTemplate.exchange(builder.toUriString(), HttpMethod.GET, entity, Resource.class);
+            return responseEntity.getBody().getInputStream();
+        }catch (IOException e) {
+            LOG.error("API call failed for : " + url + " " + e.getMessage());
+        }
+        return null;
+    }
+
+
+	public InputStream getLookupData(SiteConfiguration site, String lookupId) {
+	    String url = site.getUrl() + lookupPath + lookupId;
+	    return get(url,false);
+	}
+
+	public InputStream getMediaPlansWithOutputCurrencies(SiteConfiguration site, String planId) {
+		String outputCurrencies = new String();
+		if(null !=  site.getOutputCurrenciesForProcessing()) {
+			outputCurrencies = site.getOutputCurrenciesForProcessing().stream().collect(Collectors.joining(","));
+		}
+		String url = site.getUrl() + mediaPlanPath + planId+"?OutputCurrencies="+outputCurrencies;
+		boolean suppressFeature=suppressFeatureEnable.equalsIgnoreCase(TRUE)?true:false;
+		return get(url,suppressFeature);
+	}
+
+}
