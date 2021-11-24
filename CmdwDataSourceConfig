@@ -1,0 +1,47 @@
+package com.mediaocean.bi.cmdw.sync.configuration;
+
+import java.sql.SQLException;
+
+import javax.sql.DataSource;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.DependsOn;
+import org.springframework.context.annotation.Scope;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+
+import com.mediaocean.bi.cmdw.sync.util.OracleUCPDataSourceFactory;
+
+@Configuration
+public class CmdwDataSourceConfig { // NOSONAR
+
+    @Bean(name="cmdwDataSourceProperties")
+    @Scope("prototype")
+    @ConfigurationProperties(prefix = "cmdw.datasource")
+    public OracleUCPDataSourceFactory mmpDataSourceProperties() {
+        return new OracleUCPDataSourceFactory();
+    }
+ 
+    @Bean(name = "cmdwDataSource")
+    @DependsOn(value = { "cmdwDataSourceProperties" })
+    public DataSource datasource(@Qualifier("cmdwDataSourceProperties") OracleUCPDataSourceFactory dataSourceFactory) throws SQLException {
+        return dataSourceFactory.createPoolDataSource();
+    }
+
+    
+    @Bean(name = "jdbcCmdw")
+    JdbcTemplate jdbcTemplate(DataSource cmdwDataSource) {
+        JdbcTemplate template = new JdbcTemplate(cmdwDataSource);
+        return template;
+    }
+
+    @Bean(name = "namedParameterJdbcCmdw")
+    NamedParameterJdbcTemplate namedParameterJdbcTemplate(DataSource cmdwDataSource) {
+        NamedParameterJdbcTemplate namedParameterTemplate = new NamedParameterJdbcTemplate(cmdwDataSource);
+        return namedParameterTemplate;
+    }
+
+}
