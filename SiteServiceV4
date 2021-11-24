@@ -1,0 +1,392 @@
+package com.mediaocean.bi.cmdw.sync.mmp;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mediaocean.bi.cmdw.sync.mmp.amqp.IncrementalPlanMessagePublisher;
+import com.mediaocean.bi.cmdw.sync.mmp.amqp.PlanMessagePublisher;
+import com.mediaocean.bi.cmdw.sync.mmp.constants.Constants;
+import com.mediaocean.bi.cmdw.sync.mmp.constants.Constants.JobStatusSeverity;
+import com.mediaocean.bi.cmdw.sync.mmp.external.PlanRevisionDTO;
+import com.mediaocean.bi.cmdw.sync.mmp.external.percentallocation.ConfigurationDTO;
+import com.mediaocean.bi.cmdw.sync.mmp.management.JobControl;
+import com.mediaocean.bi.cmdw.sync.mmp.notifications.MMPApiNotificationService;
+import com.mediaocean.bi.cmdw.sync.mmp.percentallocation.BaseTenant;
+import com.mediaocean.bi.cmdw.sync.mmp.service.IncrementPlanProcessingImpl;
+import com.mediaocean.bi.cmdw.sync.mmp.util.ErrorLogUtilV3;
+import com.mediaocean.bi.cmdw.sync.util.ClassUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Profile;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+import javax.annotation.PostConstruct;
+import javax.annotation.Resource;
+import javax.inject.Inject;
+import javax.sql.DataSource;
+import java.io.IOException;
+import java.io.InputStream;
+import java.text.SimpleDateFormat;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+
+@Component
+@Profile("docker")
+public class SiteServiceV4 {
+
+    private static final boolean SUCCESS = true;
+    private static final boolean FAILURE = false;
+    @Inject
+    private PlanRepositoryV4 planRepositoryV4;
+    @Inject
+    private PlanServiceV4 planServiceV4;
+    @Inject
+    private ErrorLogUtilV3 errorLog;
+    @Inject
+    private MMPApiNotificationService emailNotification;
+    @Inject
+    private MMPProxyService mmpProxyService;
+    @Inject
+    private PlanMessagePublisher fullloadPlanMessagePublisher;
+    @Inject
+    private IncrementalPlanMessagePublisher incrementalPlanMessagePublisher;
+    @Inject
+    private PlanResponseHandler planResponseHandler;
+    @Inject
+    private SitePreProcessorDAO sitePreProcessorDAO;
+    @Inject
+    private BaseTenant baseTenant;
+    @Inject
+    private IncrementPlanProcessingImpl incrementPlanProcessingImpl;
+    @Value("${mmp.etl.503.error.threshold}")
+    private int threshold_503_error;
+    @Value("${mmp.etl.plan.download.threadpool}")
+    private int downloaderThreadPool;
+    private Logger LOG = LoggerFactory.getLogger(SiteServiceV4.class);
+    private PlanRepositoryV3.TimeProvider timeProvider = System::currentTimeMillis;
+    private JdbcTemplate jdbcTemplate;
+    @Resource(name = "dwhDataSource")
+    private DataSource dataSource;
+
+    @PostConstruct
+    public void init() throws Exception {
+        jdbcTemplate = new JdbcTemplate(dataSource);
+    }
+
+    public void loadPlansPerSite(JobControl jobControlDetails, String logPathFileName) throws Exception {
+        Long incrementStartTime = timeProvider.getTime();
+        Long runFromTime = jobControlDetails.calculateEtlDateTimeAsEpoch(); // jobControlDetails.getLastEtlDatetimeAsEpoch();
+        Long originalRunFromTime = jobControlDetails.getLastEtlDatetimeAsEpoch();
+        boolean runFullload = jobControlDetails.isRunFullLoad();
+        SiteConfiguration site = jobControlDetails.getSite();
+
+        sitePreProcessorDAO.updateIsRunningInJobHistory(site.getName());
+        sitePreProcessorDAO.insertJobStausForETLStartProcess(site.getName(), Constants.IN_PROGRESS, runFullload,
+                logPathFileName, incrementStartTime);
+        sitePreProcessorDAO.updateJobStatus(site.getName(), Constants.IN_PROGRESS, originalRunFromTime,
+                runFullload ? Constants.RUN_FULL_LOAD_TRUE : Constants.RUN_FULL_LOAD_FALSE);
+        if (runFullload) {
+
+            runFullloadForSite(site, runFromTime, runFullload, incrementStartTime, logPathFileName,
+                    originalRunFromTime, jobControlDetails);
+        } else {
+            planServiceV4.startBulkIncrProcess(site, runFromTime, runFullload, incrementStartTime, logPathFileName, jobControlDetails.getSiteCurrency());
+        }
+    }
+
+    public boolean runFullloadForSite(SiteConfiguration site, Long runFromTime, boolean runFullload,
+                                      Long incrementStartTime, String logPathFileName, Long originalRunFromTime, JobControl jobControl) throws Exception {
+        LOG.info("Started full load for site : " + site.getName());
+        boolean status = SUCCESS;
+        try {
+            sitePreProcessorDAO.processMetaDataAndCreateSiteSpecificTables(site, jobControl);
+            planServiceV4.loadPlans(site, runFromTime, runFullload, incrementStartTime, logPathFileName, jobControl.getSiteCurrency());
+        } catch (Exception e) {
+            LOG.error("ETL failed either in metadata loading or plan downloading for site {} , error {}",
+                    site.getName(), e);
+            errorLog.logError(e, site, timeProvider.getTime(), incrementStartTime, "");
+            planServiceV4.updateConfigOutQueue("MMP_" + site.getName());
+            sitePreProcessorDAO.updateJobStatus(site.getName(), Constants.COMPLETE, runFromTime,
+                    Constants.RUN_FULL_LOAD_TRUE);
+            sitePreProcessorDAO.updateJobStatusForETLEndProcess(site.getName(), false);
+
+            status = FAILURE;
+
+            // SEND CRITICAL FAILURE NOTIFICATION EMAIL
+            LOG.info("Sending " + JobStatusSeverity.CRITICAL + " email notification.");
+            emailNotification.manageEmailNotification(Constants.JobStatusConstants.FAILURE, site.getName(),
+                    logPathFileName, new SimpleDateFormat(Constants.LOG_FILE_DATE_TIME_FORMAT).format(new Date()),
+                    null);
+            throw e;
+        }
+        return status;
+    }
+
+    public void downloadPlans(Map<String, String> processablePlansWithFlag, Set<String> planIdsToProcess, SiteConfiguration site, Long incrementStartTime,
+                              String logfileTimestamp, String logPathFileName, boolean isFullLoad, String siteCurrency) throws Exception {
+
+        planRepositoryV4.updateJobStatusForDownloadStartProcess(site.getName());
+        startPlanDownloadProcess(processablePlansWithFlag, planIdsToProcess, site, incrementStartTime, logfileTimestamp, logPathFileName,
+                isFullLoad, false, siteCurrency);
+        sitePreProcessorDAO.updateJobStatusForDownloadEndProcess(site.getName());
+    }
+
+    public void startPlanDownloadProcess(Map<String, String> processablePlansWithFlag, Set<String> plansToProcess, SiteConfiguration site, Long planLoadStartTime,
+                                         String logfileTimestamp, String logPathFileName, boolean isFullLoad, boolean isPlanProcessingFromQueue, String siteCurrency) {
+        AtomicInteger counter_503_error = new AtomicInteger(0);
+        ConfigurationDTO configTemp = null;
+        if (ClassUtils.isClass(Constants.PERCENT_ALLOCATION_CLASS_PATH + site.getName())) {
+            configTemp = new ConfigurationDTO();
+            configTemp.setTenant(site.getName());
+
+            if (!isPlanProcessingFromQueue) {
+                LOG.info("Deleting temporary percent allocations...");
+                try {
+                    baseTenant.deletePercentAllocation(configTemp);
+                } catch (Exception e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                }
+            }
+        }
+        final ConfigurationDTO config = configTemp;
+
+        Map<String, Set<String>> tobeDeletedPlanRevisions = new HashMap<>();
+        Map<String, List<PlanRevisionDTO>> tempDbRevisionsMap = null;
+        if (!isFullLoad) {
+            tempDbRevisionsMap = planRepositoryV4.getDBPlanRevisions(site.getName(), tobeDeletedPlanRevisions,
+                    plansToProcess);
+        }
+
+        final Map<String, List<PlanRevisionDTO>> dbRevisionsMap = tempDbRevisionsMap == null ? new HashMap<>()
+                : tempDbRevisionsMap;
+        List<CompletableFuture<Optional<PlanProcessPayLoad>>> futureList = new CopyOnWriteArrayList<>();
+        ExecutorService executors = Executors.newFixedThreadPool(downloaderThreadPool);
+        plansToProcess.forEach(planId -> {
+            CompletableFuture<Optional<PlanProcessPayLoad>> task = CompletableFuture.supplyAsync(new PlanDownloadTask(site,
+                            planLoadStartTime, logfileTimestamp, counter_503_error, dbRevisionsMap.get(planId), planId,
+                            mmpProxyService, this, fullloadPlanMessagePublisher, incrementalPlanMessagePublisher, planResponseHandler, logPathFileName, isFullLoad,
+                            tobeDeletedPlanRevisions.get(planId), planRepositoryV4, config, incrementPlanProcessingImpl, errorLog, isFullLoad ? false : Boolean.valueOf(processablePlansWithFlag.get(planId)), isPlanProcessingFromQueue,
+                            siteCurrency, site.isMultipleCurrencyProcessingEnable()),
+                    executors);
+            futureList.add(task);
+        });
+
+        waitForAllDownloadsToComplete(futureList, site.getName());
+    }
+
+    private void waitForAllDownloadsToComplete(List<CompletableFuture<Optional<PlanProcessPayLoad>>> futuresList, String site) {
+        CompletableFuture<Void> allFuturesResult = CompletableFuture
+                .allOf(futuresList.toArray(new CompletableFuture[futuresList.size()]));
+        try {
+            allFuturesResult.get();
+            LOG.info("Download complete for site {} , Number of plans {}", site, futuresList.size());
+            for (Future<Optional<PlanProcessPayLoad>> future : futuresList) {
+                if (future != null && future.get().isPresent()) {
+                    LOG.debug("keys : " + future.get().get().getPlankeys());
+                } else {
+                    LOG.error("Could not download all the plans. Aborting the process.");
+                }
+            }
+        } catch (InterruptedException | ExecutionException e) {
+            LOG.info("Error in waiting state" + e);
+        }
+    }
+
+    public PlanProcessPayLoad getPlanProcessPayLoad(SiteConfiguration site, AtomicInteger counter_503_error,
+                                                    List<PlanRevisionDTO> dbRevisionsMap, String latestPlanId, JsonNode data, Map<String, JsonNode> responseMap,
+                                                    List<String> revisionList, Set<String> tobeDeletedPlanRevisions) throws Exception {
+
+        boolean hasInvalidPlanRevision = false;
+        PlanProcessPayLoad requestPayLoad = new PlanProcessPayLoad();
+        List<PlanRevisionDTO> allApiPlanRevisions = getAPIPlanRevisions(site, latestPlanId, counter_503_error, data,
+                responseMap);
+        List<PlanRevisionDTO> dbRevisions = new ArrayList<>(dbRevisionsMap);
+        Set<String> toUpdateIslatestPlanIdAndRevision = new HashSet<>();
+        Set<String> toUpdateIsPinnedRevisionPlanIds = new HashSet<>();
+        Set<String> toRevertIslatestPlanIds = new HashSet<>();
+        Set<String> toRevertIsPinnedPlanIds = new HashSet<>();
+        Set<PlanRevisionDTO> planRevisionsToProcess = new HashSet<>();
+
+        planRevisionsToProcess.addAll(allApiPlanRevisions);
+
+        for (PlanRevisionDTO apiRevision : allApiPlanRevisions) {
+            String apiPlanKey = latestPlanId + "." + apiRevision.getRevision();
+            boolean keyExists = dbRevisions.stream()
+                    .anyMatch(t -> (t.getPlanId() + "." + t.getRevision()).equals(apiPlanKey));
+            if (null == apiRevision.getRevision()) {
+                hasInvalidPlanRevision = true;
+            } else {
+                boolean isNotLatestFlow = apiRevision.getIsLatest().equals("0")
+                        && site.getPlanWorkflowSteps().contains(apiRevision.getStatus());
+                boolean isPinnedRevisionInAPIFlow = apiRevision.isPinnedRevision();
+                if (isNotLatestFlow || isPinnedRevisionInAPIFlow) {
+                    boolean add = true;
+                    boolean revisionExist = false;
+
+                    if (isPinnedRevisionInAPIFlow) {
+                        toUpdateIsPinnedRevisionPlanIds.add(apiPlanKey);
+                    }
+                    for (PlanRevisionDTO dbAPI : dbRevisions) {
+                        String dbPlanKey = dbAPI.getPlanId() + "." + dbAPI.getRevision();
+                        if (dbAPI.getIsLatest().equals("1")) {
+                            toRevertIslatestPlanIds.add(dbPlanKey);
+                        }
+
+                        if (apiRevision.getRevision().equals(dbAPI.getRevision())
+                                && apiRevision.getStatus().equals(dbAPI.getStatus())) {
+                            tobeDeletedPlanRevisions.remove(apiPlanKey);
+                            add = false;
+                        }
+                        if (isPinnedRevisionInAPIFlow && dbAPI.isPinnedRevision()
+                                && !dbAPI.getRevision().equals(apiRevision.getRevision())) {
+                            toRevertIsPinnedPlanIds.add(dbPlanKey);
+                        }
+                        // check if a revision is already exist or not in db. if exist then mark it
+                        // revsionExist to true.
+                        if (apiPlanKey.equalsIgnoreCase(dbPlanKey)) {
+                            revisionExist = true;
+                        }
+                    }
+                    // if revision is not exist in db then only insert that plan key into
+                    // planIdstoProcess.
+                    if (((add && isNotLatestFlow)
+                            || (isPinnedRevisionInAPIFlow && !apiRevision.getIsLatest().equals("1")))
+                            && !revisionExist) {
+                        revisionList.add(apiPlanKey + "/");
+                    }
+                }
+                if (apiRevision.getIsLatest().equals("1")) {
+                    toUpdateIslatestPlanIdAndRevision.add(apiPlanKey);
+                    if (keyExists) {
+                        revisionList.remove(latestPlanId);
+                        tobeDeletedPlanRevisions.remove(apiPlanKey);
+                    }
+                }
+
+            }
+        }
+        // this is a dead condition . it is invalid scenario. we would have at least one
+        // valid revision.
+        if (null != allApiPlanRevisions && (hasInvalidPlanRevision || allApiPlanRevisions.size() < 1)) {
+            toUpdateIslatestPlanIdAndRevision.add(latestPlanId);
+        }
+
+        requestPayLoad.setPlankeys(revisionList);
+        requestPayLoad.setSite(site);
+        requestPayLoad.setTobeDeletedPlanRevisions(tobeDeletedPlanRevisions);
+        requestPayLoad.setToRevertIslatestPlanIds(toRevertIslatestPlanIds);
+        requestPayLoad.setToRevertIsPinnedPlanIds(toRevertIsPinnedPlanIds);
+        requestPayLoad.setToUpdateIslatestPlanIdAndRevision(toUpdateIslatestPlanIdAndRevision);
+        requestPayLoad.setToUpdateIsPinnedRevisionPlanIds(toUpdateIsPinnedRevisionPlanIds);
+        requestPayLoad.setPlanRevisionsToProcess(planRevisionsToProcess);
+        PlanRevisionDTO latestRevisionDTO = planRevisionsToProcess.stream()
+                .filter(dto -> dto.getIsLatest().equalsIgnoreCase("1")).findAny().get();
+        requestPayLoad.setLatestRevision(latestRevisionDTO != null ? latestRevisionDTO.getRevision() : null);
+        // requestPayLoad.setLatestRevision(toUpdateIslatestPlanIdAndRevision.iterator().next().split(".")[1]);
+
+        return requestPayLoad;
+    }
+
+    private List<PlanRevisionDTO> getAPIPlanRevisions(SiteConfiguration site, String planId,
+                                                      AtomicInteger counter_503_error, JsonNode data, Map<String, JsonNode> responseMap) throws Exception {
+        List<PlanRevisionDTO> planRevisions = new ArrayList<>();
+        Set<String> capturedPlanRevisions = new HashSet<>();
+        try {
+
+            Iterator<JsonNode> datasetElements = data.iterator();
+            String latestRevision = null;
+            String status = null;
+            String pinnedRevision = null;
+            JsonNode revisionsNode = null;
+            while (datasetElements.hasNext()) {
+                JsonNode datasetElement = datasetElements.next();
+                latestRevision = datasetElement.get("__r").asText();
+                revisionsNode = datasetElement.get(".reportableRevisions");
+                if (null != datasetElement.get(".pinnedRevision")) {
+                    pinnedRevision = datasetElement.get(".pinnedRevision").asText();
+                }
+                status = datasetElement.get(".status").asText();
+            }
+            if ((null == pinnedRevision) || (null != pinnedRevision && pinnedRevision.equals(latestRevision))) {
+                capturedPlanRevisions.add(latestRevision);
+                planRevisions.add(new PlanRevisionDTO(planId, latestRevision, status, "1", true));
+            }
+            if (null != pinnedRevision && !pinnedRevision.equals(latestRevision)) {
+                capturedPlanRevisions.add(latestRevision);
+                planRevisions.add(new PlanRevisionDTO(planId, latestRevision, status, "1", false));
+
+                // Get the actual status of the pinnedRevision
+                //LOG.info("Getting pinned revision status for planId: " + planId + "...");
+                String pinnedRevisionStatus = getAPIPlanRevisionStatus(site, planId, pinnedRevision, counter_503_error,
+                        responseMap);
+                if (pinnedRevisionStatus != null) {
+                    //LOG.info("Pinned revision status for planId: " + planId + " is " + pinnedRevisionStatus + ".");
+                    capturedPlanRevisions.add(pinnedRevision);
+                    planRevisions.add(new PlanRevisionDTO(planId, pinnedRevision, pinnedRevisionStatus, "0", true));
+                } else {
+                    LOG.info("Could not download the revision for plan id: {}", planId);
+                    return null;
+                }
+            }
+
+            if (null != revisionsNode) {
+                Iterator<JsonNode> revisions = revisionsNode.iterator();
+                while (revisions.hasNext()) {
+                    JsonNode revs = revisions.next();
+                    String currentRevision = revs.path("rev").asText();
+                    if (!latestRevision.equals(currentRevision) && !capturedPlanRevisions.contains(currentRevision)) {
+                        planRevisions.add(new PlanRevisionDTO(revs.path("__id").asText(), currentRevision,
+                                revs.path("wf").asText(), "0", false));
+                    }
+                }
+            } else {
+                LOG.info("No reportableRevisions found for plan : " + planId);
+            }
+        } catch (Exception e) {
+            LOG.error("failed to get Plan Revisions : " + e.getMessage());
+            errorLog.logError(e, site.getName(), planId);
+            throw e;
+        }
+        return planRevisions;
+    }
+
+    public String getAPIPlanRevisionStatus(SiteConfiguration site, String planId, String revision,
+                                           AtomicInteger counter_503_error, Map<String, JsonNode> responseMap)
+            throws IOException {
+        String revisionStatus = null;
+
+        ObjectMapper objectMapper = new ObjectMapper();
+        InputStream mediaPlanRevision = null;
+        if (site.isMultipleCurrencyProcessingEnable()) {
+            mediaPlanRevision = mmpProxyService.getMediaPlansWithOutputCurrencies(site, getPlanRevisionKey(planId, revision));
+        } else {
+            mediaPlanRevision = mmpProxyService.getMediaPlans(site, getPlanRevisionKey(planId, revision));
+        }
+
+        if (mediaPlanRevision != null) {
+            JsonNode data = objectMapper.readValue(mediaPlanRevision, JsonNode.class).get("data");
+            responseMap.put(getPlanRevisionKey(planId, revision), data);
+            if (null != data && data.isArray()) {
+                Iterator<JsonNode> datasetElements = data.iterator();
+                while (datasetElements.hasNext()) {
+                    JsonNode element = datasetElements.next();
+                    if (null != element) {
+                        JsonNode statusNode = element.get(".status");
+                        if (null != statusNode) {
+                            revisionStatus = statusNode.asText();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        return revisionStatus;
+    }
+
+    public String getPlanRevisionKey(String planId, String revision) {
+        return planId + "." + revision + "/";
+    }
+}
