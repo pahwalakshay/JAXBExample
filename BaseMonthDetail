@@ -1,0 +1,345 @@
+package com.mediaocean.data.api.commons.type.dto;
+
+import org.codehaus.jackson.annotate.JsonProperty;
+import org.codehaus.jackson.annotate.JsonPropertyOrder;
+
+import javax.xml.bind.annotation.XmlAccessType;
+import javax.xml.bind.annotation.XmlAccessorType;
+import javax.xml.bind.annotation.XmlAttribute;
+import javax.xml.bind.annotation.XmlElement;
+import java.math.BigDecimal;
+import java.text.DateFormat;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Comparator;
+import java.util.Date;
+
+
+@XmlAccessorType(XmlAccessType.FIELD)
+@JsonPropertyOrder({"value", "detailId", "LateStartDate", "EarlyEndDate", "PlacementMonthlyStartDate", "PlacementMonthlyEndDate", "PlannedAmount",
+        "PlannedUnits", "PlannedActions", "IOAmount", "ApprovedUnits", "TotalRemainingAmount", "TotalRemainingUnits", "MediaPayable", "BillableCost", "PlannedBillableUnits", "CostingKPI", "CostingKPIValue"})
+public class BaseMonthDetail implements Comparator<BaseMonthDetail> {
+    @XmlAttribute(name = "value")
+    @JsonProperty("value")
+    protected String value;
+    @XmlAttribute(name = "detailId")
+    @JsonProperty("detailId")
+    protected Long detailId;
+    @XmlElement(name = "LateStartDate")
+    @JsonProperty("LateStartDate")
+    protected String lateStartDate;
+    @XmlElement(name = "EarlyEndDate")
+    @JsonProperty("EarlyEndDate")
+    protected String earlyEndDate;
+    @XmlElement(name = "PlacementMonthlyStartDate")
+    @JsonProperty("PlacementMonthlyStartDate")
+    protected String placementMonthlyStartDate;
+    @XmlElement(name = "PlacementMonthlyEndDate")
+    @JsonProperty("PlacementMonthlyEndDate")
+    protected String placementMonthlyEndDate;
+    @XmlElement(name = "PlannedAmount")
+    @JsonProperty("PlannedAmount")
+    protected BigDecimal plannedAmount;
+    @XmlElement(name = "PlannedUnits")
+    @JsonProperty("PlannedUnits")
+    protected Long plannedUnits;
+    @XmlElement(name = "PlannedActions")
+    @JsonProperty("PlannedActions")
+    protected Long plannedActions;
+    @XmlElement(name = "IOAmount")
+    @JsonProperty("IOAmount")
+    protected BigDecimal iOAmount;
+    @XmlElement(name = "ApprovedUnits")
+    @JsonProperty("ApprovedUnits")
+    protected Long approvedUnits;
+    @XmlElement(name = "TotalRemainingAmount")
+    @JsonProperty("TotalRemainingAmount")
+    protected BigDecimal totalRemainingAmount;
+    @XmlElement(name = "TotalRemainingUnits")
+    @JsonProperty("TotalRemainingUnits")
+    protected Long totalRemainingUnits;
+    @JsonProperty("MediaPayable")
+    @XmlElement(name = "MediaPayable")
+    protected BigDecimal mediaPayable;
+    @XmlElement(name = "BillableCost")
+    @JsonProperty("BillableCost")
+    protected BigDecimal billableCost;
+    @XmlElement(name = "ActualizedCost")
+    @JsonProperty("ActualizedCost")
+    private BigDecimal actualizedCost;
+    @XmlElement(name = "PlannedBillableUnits")
+    @JsonProperty("PlannedBillableUnits")
+    protected Long plannedBillableUnits;
+    @XmlElement(name = "PlannedImpressions")
+    @JsonProperty("PlannedImpressions")
+    private Long plannedImpressions;
+    @XmlElement(name = "PlannedClicks")
+    @JsonProperty("PlannedClicks")
+    private Long plannedClicks;
+    @XmlElement(name = "ApprovedAmount")
+    @JsonProperty("ApprovedAmount")
+    private BigDecimal approvedAmount;
+    @XmlElement(name = "ApprovedSource")
+    @JsonProperty("ApprovedSource")
+    private String approvedSource;
+    @XmlElement(name = "OriginalAmount")
+    @JsonProperty("OriginalAmount")
+    private BigDecimal originalAmount;
+    @XmlElement(name = "PlannedFees")
+    @JsonProperty("PlannedFees")
+    private BigDecimal plannedFees;
+    @XmlElement(name = "BillablePlannedFees")
+    @JsonProperty("BillablePlannedFees")
+    private BigDecimal billablePlannedFees;
+    @XmlElement(name = "BillableActualizedCost")
+    @JsonProperty("BillableActualizedCost")
+    private BigDecimal billableActualizedCost;
+    @XmlElement(name = "PlannedMargin")
+    @JsonProperty("PlannedMargin")
+    private BigDecimal plannedMargin;
+    @XmlElement(name = "CostingKPI")
+    @JsonProperty("CostingKPI")
+    private String costingKPI;
+    @XmlElement(name = "CostingKPIValue")
+    @JsonProperty("CostingKPIValue")
+    private Long costingKPIValue;
+
+    public String getValue() {
+        return value;
+    }
+
+    public void setValue(String value) {
+        this.value = value;
+    }
+
+    public Long getDetailId() {
+        return detailId;
+    }
+
+    public void setDetailId(Long detailId) {
+        this.detailId = detailId;
+    }
+
+    public String getLateStartDate() {
+        return lateStartDate;
+    }
+
+    public void setLateStartDate(String lateStartDate) {
+        this.lateStartDate = lateStartDate;
+    }
+
+    public String getEarlyEndDate() {
+        return earlyEndDate;
+    }
+
+    public void setEarlyEndDate(String earlyEndDate) {
+        this.earlyEndDate = earlyEndDate;
+    }
+
+    public String getPlacementMonthlyStartDate() {
+        return placementMonthlyStartDate;
+    }
+
+    public void setPlacementMonthlyStartDate(String placementMonthlyStartDate) {
+        this.placementMonthlyStartDate = placementMonthlyStartDate;
+    }
+
+    public String getPlacementMonthlyEndDate() {
+        return placementMonthlyEndDate;
+    }
+
+    public void setPlacementMonthlyEndDate(String placementMonthlyEndDate) {
+        this.placementMonthlyEndDate = placementMonthlyEndDate;
+    }
+
+    public BigDecimal getPlannedAmount() {
+        return plannedAmount;
+    }
+
+    public void setPlannedAmount(BigDecimal plannedAmount) {
+        this.plannedAmount = plannedAmount;
+    }
+
+    public Long getPlannedUnits() {
+        return plannedUnits;
+    }
+
+    public void setPlannedUnits(Long plannedUnits) {
+        this.plannedUnits = plannedUnits;
+    }
+
+    public Long getPlannedImpressions() {
+        return plannedImpressions;
+    }
+
+    public void setPlannedImpressions(Long plannedImpressions) {
+        this.plannedImpressions = plannedImpressions;
+    }
+
+    public Long getPlannedActions() {
+        return plannedActions;
+    }
+
+    public void setPlannedActions(Long plannedActions) {
+        this.plannedActions = plannedActions;
+    }
+
+    public BigDecimal getiOAmount() {
+        return iOAmount;
+    }
+
+    public void setiOAmount(BigDecimal iOAmount) {
+        this.iOAmount = iOAmount;
+    }
+
+    public Long getApprovedUnits() {
+        return approvedUnits;
+    }
+
+    public void setApprovedUnits(Long approvedUnits) {
+        this.approvedUnits = approvedUnits;
+    }
+
+    public BigDecimal getTotalRemainingAmount() {
+        return totalRemainingAmount;
+    }
+
+    public void setTotalRemainingAmount(BigDecimal totalRemainingAmount) {
+        this.totalRemainingAmount = totalRemainingAmount;
+    }
+
+    public Long getTotalRemainingUnits() {
+        return totalRemainingUnits;
+    }
+
+    public void setTotalRemainingUnits(Long totalRemainingUnits) {
+        this.totalRemainingUnits = totalRemainingUnits;
+    }
+
+    public BigDecimal getMediaPayable() {
+        return mediaPayable;
+    }
+
+    public void setMediaPayable(BigDecimal mediaPayable) {
+        this.mediaPayable = mediaPayable;
+    }
+
+    public BigDecimal getBillableCost() {
+        return billableCost;
+    }
+
+    public void setBillableCost(BigDecimal billableCost) {
+        this.billableCost = billableCost;
+    }
+
+    public Long getPlannedBillableUnits() {
+        return plannedBillableUnits;
+    }
+
+    public void setPlannedBillableUnits(Long plannedBillableUnits) {
+        this.plannedBillableUnits = plannedBillableUnits;
+    }
+
+    public Long getPlannedClicks() {
+        return plannedClicks;
+    }
+
+    public void setPlannedClicks(Long plannedClicks) {
+        this.plannedClicks = plannedClicks;
+    }
+
+    public BigDecimal getActualizedCost() {
+        return actualizedCost;
+    }
+
+    public void setActualizedCost(BigDecimal actualizedCost) {
+        this.actualizedCost = actualizedCost;
+    }
+
+    public BigDecimal getPlannedFees() {
+        return plannedFees;
+    }
+
+    public void setPlannedFees(BigDecimal plannedFees) {
+        this.plannedFees = plannedFees;
+    }
+
+    public BigDecimal getBillablePlannedFees() {
+        return billablePlannedFees;
+    }
+
+    public void setBillablePlannedFees(BigDecimal billablePlannedFees) {
+        this.billablePlannedFees = billablePlannedFees;
+    }
+
+    public BigDecimal getApprovedAmount() {
+        return approvedAmount;
+    }
+
+    public void setApprovedAmount(BigDecimal approvedAmount) {
+        this.approvedAmount = approvedAmount;
+    }
+
+    public String getApprovedSource() {
+        return approvedSource;
+    }
+
+    public void setApprovedSource(String approvedSource) {
+        this.approvedSource = approvedSource;
+    }
+
+    public BigDecimal getOriginalAmount() {
+        return originalAmount;
+    }
+
+    public void setOriginalAmount(BigDecimal originalAmount) {
+        this.originalAmount = originalAmount;
+    }
+
+    public BigDecimal getBillableActualizedCost() {
+        return billableActualizedCost;
+    }
+
+    public void setBillableActualizedCost(BigDecimal billableActualizedCost) {
+        this.billableActualizedCost = billableActualizedCost;
+    }
+
+    public BigDecimal getPlannedMargin() {
+        return plannedMargin;
+    }
+
+    public void setPlannedMargin(BigDecimal plannedMargin) {
+        this.plannedMargin = plannedMargin;
+    }
+
+    public String getCostingKPI() {
+        return costingKPI;
+    }
+
+    public void setCostingKPI(String costingKPI) {
+        this.costingKPI = costingKPI;
+    }
+
+    public Long getCostingKPIValue() {
+        return costingKPIValue;
+    }
+
+    public void setCostingKPIValue(Long costingKPIValue) {
+        this.costingKPIValue = costingKPIValue;
+    }
+
+    @Override
+    public int compare(BaseMonthDetail o1, BaseMonthDetail o2) {
+        DateFormat inputFormat = new SimpleDateFormat("yyyy-MM-dd");
+        int compareResult = 0;
+
+        try {
+            Date arg0Date = inputFormat.parse(o1.getPlacementMonthlyStartDate());
+            Date arg1Date = inputFormat.parse(o2.getPlacementMonthlyStartDate());
+            compareResult = arg0Date.compareTo(arg1Date);
+        } catch (ParseException e) {
+            e.printStackTrace();
+        }
+        return compareResult;
+    }
+}
