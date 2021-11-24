@@ -1,0 +1,86 @@
+package com.mediaocean.data.api.commons.type.dto;
+
+import org.springframework.jdbc.core.RowMapper;
+
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
+
+public class PlacementMonthlyDetailsMapper implements RowMapper<BaseMonthlyPlacement> {
+
+    @Override
+    public BaseMonthlyPlacement mapRow(ResultSet rs, int rowNum) throws SQLException {
+        BaseMonthlyPlacement baseMonthlyPlacement = new BaseMonthlyPlacement();
+        baseMonthlyPlacement.setCampaignId(rs.getLong("CAMPAIGN_ID"));
+        baseMonthlyPlacement.setPlacementId(rs.getLong("PLACEMENT_ID"));
+        baseMonthlyPlacement.setPackageId(String.valueOf(rs.getLong("PACKAGE_ID")));
+        baseMonthlyPlacement.setPackageTypeId(String.valueOf(rs.getLong("PACKAGE_TYPE_ID")));
+        baseMonthlyPlacement.setPackageType(rs.getString("PACKAGE_TYPE"));
+        baseMonthlyPlacement.setPlacementNumber(rs.getString("PLACEMENT_NUMBER"));
+        baseMonthlyPlacement.setIsPrimaryPlacement(rs.getString("IS_PRIMARY_PLACEMENT"));
+        String isPlacementDeleted = rs.getString("IS_PLACEMENT_DELETED").equals("1") ? "Y" : "N";
+        baseMonthlyPlacement.setIsPlacementDeleted(isPlacementDeleted);
+        baseMonthlyPlacement.setBuyDetailId(String.valueOf(rs.getLong("BUY_DETAIL_ID")));
+        baseMonthlyPlacement.setMonthBeginDate(formatDate(rs.getString("MONTH_BEGIN_DATE")));
+        Long detailId = rs.getLong("detailId");
+        baseMonthlyPlacement.setDetailId(rs.wasNull() ? null : detailId);
+        baseMonthlyPlacement.setLateStartDate(formatDate(rs.getString("LATESTARTDATE")));
+        baseMonthlyPlacement.setEarlyEndDate(formatDate(rs.getString("EARLYENDDATE")));
+        baseMonthlyPlacement.setPlacementMonthlyStartDate(formatDate(rs.getString("PLACEMENTMONTHLYSTARTDATE")));
+        baseMonthlyPlacement.setPlacementMonthlyEndDate(formatDate(rs.getString("PLACEMENTMONTHLYENDDATE")));
+        baseMonthlyPlacement.setPlannedAmount(rs.getBigDecimal("PLANNEDAMOUNT"));
+        baseMonthlyPlacement.setPlannedUnits(rs.getLong("PLANNEDUNITS"));
+        Long impressions = rs.getLong("PlannedImpressions");
+        baseMonthlyPlacement.setPlannedImpressions(rs.wasNull() ? null : impressions);
+        Long clicks = rs.getLong("PlannedClicks");
+        baseMonthlyPlacement.setPlannedClicks(rs.wasNull() ? null : clicks);
+        Long plannedActions = rs.getLong("PlannedActions");
+        baseMonthlyPlacement.setPlannedActions(rs.wasNull() ? null : plannedActions);
+        baseMonthlyPlacement.setIOAmount(rs.getBigDecimal("IOAmount"));
+        baseMonthlyPlacement.setApprovedAmount(rs.getBigDecimal("ApprovedAmount"));
+        baseMonthlyPlacement.setApprovedUnits(rs.getLong("ApprovedUnits"));
+        baseMonthlyPlacement.setApprovedSource(rs.getString("ApprovedSource"));
+        baseMonthlyPlacement.setOriginalAmount(rs.getBigDecimal("OriginalAmount"));
+        baseMonthlyPlacement.setTotalRemainingAmount(rs.getBigDecimal("TotalRemainingAmount"));
+        baseMonthlyPlacement.setTotalRemainingUnits(rs.getLong("TotalRemainingUnits"));
+        baseMonthlyPlacement.setMediaPayable(rs.getBigDecimal("MediaPayable"));
+        baseMonthlyPlacement.setBillableCost(rs.getBigDecimal("BillableCost"));
+        baseMonthlyPlacement.setPlannedFees(rs.getBigDecimal("PlannedFees"));
+        baseMonthlyPlacement.setBillablePlannedFees(rs.getBigDecimal("BillablePlannedFees"));
+        baseMonthlyPlacement.setActualizedCost(rs.getBigDecimal("ActualizedCost"));
+        baseMonthlyPlacement.setBillableActualizedCost(rs.getBigDecimal("BillableActualizedCost"));
+        baseMonthlyPlacement.setPlannedBillableUnits(rs.getLong("PlannedBillableUnits"));
+        baseMonthlyPlacement.setPlannedMargin(rs.getBigDecimal("PlannedMargin"));
+        baseMonthlyPlacement.setAdvertiserBusinesskey(rs.getString("advertiser_business_key"));
+        baseMonthlyPlacement.setProductBusinesskey(rs.getString("product_business_key"));
+        baseMonthlyPlacement.setProductCode(rs.getString("product_code"));
+        baseMonthlyPlacement.setEstimateBusinesskey(rs.getString("estimate_business_key"));
+        baseMonthlyPlacement.setEstimateCode(rs.getString("estimate_code"));
+        baseMonthlyPlacement.setAdvertiserCode(rs.getString("advertiser_code"));
+        baseMonthlyPlacement.setMediaCode(rs.getString("media_code"));
+        baseMonthlyPlacement.setBuyType(rs.getString("buy_type"));
+        baseMonthlyPlacement.setCostingKPI(rs.getString("CostingKPI"));
+        baseMonthlyPlacement.setCostingKPIValue(rs.getLong("CostingKPIValue"));
+
+        return baseMonthlyPlacement;
+    }
+
+    private String formatDate(String dateString) {
+        String formattedDate = null;
+        DateFormat outputFormat = new SimpleDateFormat("yyyy-MM-dd");
+        DateFormat inputFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.S");
+        Date date = null;
+        try {
+            if (null != dateString) {
+                date = inputFormat.parse(dateString);
+                formattedDate = outputFormat.format(date);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return formattedDate;
+    }
+}
