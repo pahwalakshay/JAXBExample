@@ -1,0 +1,394 @@
+package com.mediaocean.bi.cmdw.sync.mmp;
+
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import javax.annotation.PostConstruct;
+import javax.annotation.Resource;
+import javax.sql.DataSource;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataAccessException;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mediaocean.bi.cmdw.sync.mmp.constants.DocDefConstants;
+import com.mediaocean.bi.cmdw.sync.mmp.dto.LPMFieldValueUpdateDTO;
+import com.mediaocean.bi.cmdw.sync.mmp.external.metadata.FieldDefLinkedDefDTO;
+import com.mediaocean.bi.cmdw.sync.mmp.external.metadata.FieldDefinitionMetadataDTO;
+import com.mediaocean.bi.cmdw.sync.mmp.external.metadata.FieldDefinitionRelatedFieldsDTO;
+import com.mediaocean.bi.cmdw.sync.mmp.external.metadata.FieldValueDTO;
+import com.mediaocean.bi.cmdw.sync.mmp.external.metadata.FieldValuesDTO;
+import com.mediaocean.bi.cmdw.sync.mmp.external.metadata.UserAttributesDTO;
+import com.mediaocean.bi.cmdw.sync.mmp.external.metadata.UserDTO;
+
+@Component
+public class DocDefRepository {
+
+    @Resource(name = "dwhDataSource")
+    private DataSource dataSource;
+
+    private JdbcTemplate jdbcTemplate;
+
+    private static final Logger LOG = LoggerFactory.getLogger(DocDefRepository.class);
+    @PostConstruct
+    public void init() throws Exception {
+        jdbcTemplate = new JdbcTemplate(dataSource);
+    }
+
+    void init(String tenant) throws Exception {
+        String[] cleanUpSqls =
+                new String[] { buildCleanUpQuery(DocDefConstants.FIELD_VALUE_CLEANUP, tenant), buildCleanUpQuery(DocDefConstants.FIELD_DEF_LINKED_VALUE_CLEANUP, tenant),
+                        buildCleanUpQuery(DocDefConstants.FIELD_DEF_LINKED_CLEANUP, tenant), buildCleanUpQuery(DocDefConstants.FIELD_DEF_CLEANUP, tenant),
+                        buildCleanUpQuery(DocDefConstants.USER_GEO_CLEANUP, tenant), buildCleanUpQuery(DocDefConstants.USER_BIZ_CLEANUP, tenant),
+                        buildCleanUpQuery(DocDefConstants.USER_COMP_CLEANUP, tenant), buildCleanUpQuery(DocDefConstants.USER_CLEANUP, tenant) };
+        jdbcTemplate.batchUpdate(cleanUpSqls);
+    }
+
+    private String buildCleanUpQuery(String sql, String tenant) {
+        return sql.replace("<TENANT>", StringUtils.quote(tenant));
+    }
+
+    public void persistFieldDefinitions(List<FieldDefinitionMetadataDTO> fieldDefsMetadata, String tenant) throws Exception {
+
+        List<Object[]> fieldDefBaseQueryBatchArgs = new ArrayList<>();
+        List<Object[]> fieldDefLinkedQueryBatchArgs = new ArrayList<>();
+
+        for (FieldDefinitionMetadataDTO fieldDef : fieldDefsMetadata) {
+            fieldDefBaseQueryBatchArgs.add(new Object[] { fieldDef.getFieldDefId(), fieldDef.getParentFieldDefId(), fieldDef.getChildFieldDefId(), fieldDef.getFieldDefKey(),
+                    (fieldDef.getFieldDefLabel() == null ? fieldDef.getFieldDefName() : fieldDef.getFieldDefLabel()), (fieldDef.getMediaPlanInherited() == null ? 0 : fieldDef.getMediaPlanInherited() == true ? 1 : 0),
+                    fieldDef.getMediaPlanEnabled(),fieldDef.getMediaPlanReportable(), (fieldDef.getFlightInherited() == null ? 0 : fieldDef.getFlightInherited() == true ? 1 : 0), fieldDef.getFlightEnabled(),
+                    fieldDef.getFlightReportable(), (fieldDef.getSubFlightInherited() == null ? 0 : fieldDef.getSubFlightInherited() == true ? 1 : 0), fieldDef.getSubFlightEnabled(),
+                    fieldDef.getSubFlightReportable(), (fieldDef.getAuthorizationInherited() == null ? 0 : fieldDef.getAuthorizationInherited() == true ? 1 : 0), fieldDef.getAuthorizationEnabled(),
+                    fieldDef.getAuthorizationReportable(), tenant, fieldDef.getFieldDefDataType(), fieldDef.getFieldDefAllocateType(), fieldDef.getAuthorizationDetail(), fieldDef.getFieldDefName(), fieldDef.getFieldAccessMode(),fieldDef.getFieldDefInputType()});
+
+            // handle related fields
+            for (FieldDefinitionRelatedFieldsDTO dto : fieldDef.getRelatedFields()) {
+                fieldDefLinkedQueryBatchArgs.add(
+                        new Object[] { dto.getId(), dto.getKey(), dto.getLabel(), fieldDef.getFieldDefId(), fieldDef.getFieldDefName(), dto.getFieldDefId(), tenant });
+
+            }
+        }
+        jdbcTemplate.batchUpdate(DocDefConstants.FIELD_DEF_BASE_QUERY, fieldDefBaseQueryBatchArgs);
+        jdbcTemplate.batchUpdate(DocDefConstants.FIELD_DEF_LINKED_QUERY, fieldDefLinkedQueryBatchArgs);
+    }
+
+    public void persistLinkedFieldValues(String tenant, JsonNode dataset) throws Exception {
+
+
+        Object[] fieldDefLinkedDefsArgs = new Object[] { tenant, tenant };
+        String FIELD_DEF_LINKED_DEFS_SQL=DocDefConstants.FIELD_DEF_LINKED_DEFS;
+        List<Object[]> fieldDefLinkedValueQueryBatchArgs = extractLinkedFieldValuesData(tenant, dataset, FIELD_DEF_LINKED_DEFS_SQL,fieldDefLinkedDefsArgs,"insert");
+        jdbcTemplate.batchUpdate(DocDefConstants.FIELD_DEF_LINKED_VALUE_QUERY, fieldDefLinkedValueQueryBatchArgs);
+    }
+
+	public void updateLinkedValueData(LPMFieldValueUpdateDTO fieldValuePayLoad, JsonNode fieldValuesNode,String fieldDefId) {
+		     String FIELD_DEF_LINKED_DEFS_SQL=DocDefConstants.SINGLE_FIELD_DEF_LINKED_DEFS;
+		     String tenant=fieldValuePayLoad.getTenant();
+		     String fieldValueId=fieldValuePayLoad.getFieldId();
+		     String fieldValue=fieldValuePayLoad.getFieldValue();
+		      Object[] fieldDefLinkedDefsArgs = new Object[] { tenant, tenant,fieldDefId };
+		     List<Object[]> fieldDefLinkedValueQueryBatchArgs = null;
+			try {
+				fieldDefLinkedValueQueryBatchArgs = extractLinkedFieldValuesData(tenant, fieldValuesNode, FIELD_DEF_LINKED_DEFS_SQL,fieldDefLinkedDefsArgs,"update");
+				jdbcTemplate.update(DocDefConstants.FIELD_DEF_LINKED_VALUE_QUERY_TEMP_DELETE,new Object[]{tenant,fieldValueId});
+				jdbcTemplate.batchUpdate(DocDefConstants.FIELD_DEF_LINKED_VALUE_QUERY_TEMP,fieldDefLinkedValueQueryBatchArgs);
+				jdbcTemplate.update(DocDefConstants.FIELD_DEF_LINKED_VALUE_QUERY_DELETE, new Object[]{tenant,fieldValueId});
+                jdbcTemplate.update(DocDefConstants.INSERT_FIELD_DEF_LINKED_VALUE_QUERY, new Object[]{tenant,fieldValueId});
+               // jdbcTemplate.update(DocDefConstants.LINKED_FIELD_VALUE_MERGE_SQL.replace("<TENANT>",tenant).replace("<FIELD_ID>", fieldValueId));
+				jdbcTemplate.update(DocDefConstants.UPDATE_FIELD_VALUE,new Object[] {fieldValue,fieldValueId,tenant});
+				jdbcTemplate.update(DocDefConstants.UPDATE_LINKED_FIELD_VALUE,new Object[] {fieldValue,fieldValueId,tenant});
+			} catch (DataAccessException | SQLException e) {
+				LOG.info("Exception while updating linked field values for tenant {} and id {}",tenant,fieldValueId);
+			}
+
+
+	}
+
+	private List<Object[]> extractLinkedFieldValuesData(String tenant, JsonNode dataset,String FIELD_DEF_LINKED_DEFS_SQL, Object[] fieldDefLinkedDefsArgs, String event) throws DataAccessException, SQLException {
+
+		  Map<String, List<FieldDefLinkedDefDTO>> fieldKeys = new HashMap<String, List<FieldDefLinkedDefDTO>>();
+
+
+		jdbcTemplate.query(FIELD_DEF_LINKED_DEFS_SQL, fieldDefLinkedDefsArgs, (rs) -> {
+            String fieldDefKey = "/FieldDefinition/" + rs.getString(1);
+            List<FieldDefLinkedDefDTO> linkedFields;
+            if (fieldKeys.containsKey(fieldDefKey)) {
+                linkedFields = fieldKeys.get(fieldDefKey);
+            }
+            else {
+                linkedFields = new ArrayList<>();
+            }
+            String linkedFieldDefKey = rs.getString(5);
+            //linkedFieldDefKey = Character.toLowerCase(linkedFieldDefKey.charAt(0)) + linkedFieldDefKey.substring(1);
+
+            linkedFields.add(new FieldDefLinkedDefDTO(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4), linkedFieldDefKey, rs.getString(6)));
+            fieldKeys.put(fieldDefKey, linkedFields);
+        });
+        List<Object[]> fieldDefLinkedValueQueryBatchArgs = new ArrayList<>();
+
+        //JsonNode dataset = PlanParser.fieldValueJsonNode.get("data");
+        Iterator<JsonNode> datasetElements = dataset.iterator();
+        while (datasetElements.hasNext()) {
+            JsonNode valueObject = datasetElements.next();
+            if (fieldKeys.containsKey(valueObject.get(".definition").asText())) {
+                List<FieldDefLinkedDefDTO> linkedFields = fieldKeys.get(valueObject.get(".definition").asText());
+
+                for (FieldDefLinkedDefDTO linkedField : linkedFields) {
+                    String value;
+                    String valueId=null;
+                    if (valueObject.get(linkedField.getLinkedFieldDefKey()) != null) {
+                        if (valueObject.get(linkedField.getLinkedFieldDefKey()).isObject()) {
+                            if (valueObject.get(linkedField.getLinkedFieldDefKey()).has("vl")) {
+                                if (valueObject.get(linkedField.getLinkedFieldDefKey()).get("vl").isArray()) {
+                                    for (int i = 0; i < valueObject.get(linkedField.getLinkedFieldDefKey()).get("vl").size(); i++) {
+                                        value = valueObject.get(linkedField.getLinkedFieldDefKey()).get("vl").get(i).asText();
+                                        valueId=valueObject.get(linkedField.getLinkedFieldDefKey()).get("v").get(i).get("__id").asText();
+                                        fieldDefLinkedValueQueryBatchArgs = setFieldDefLinkedValues(linkedField, valueObject.get("v").asText(), valueObject.get("__id").asText(),
+                                                value, tenant,valueId, fieldDefLinkedValueQueryBatchArgs,event);
+                                    }
+                                }
+                                else if (valueObject.get(linkedField.getLinkedFieldDefKey()).get("vl").isTextual()) {
+                                    value = valueObject.get(linkedField.getLinkedFieldDefKey()).get("vl").asText();
+                                    valueId=valueObject.get(linkedField.getLinkedFieldDefKey()).get("v").asText();
+                                    fieldDefLinkedValueQueryBatchArgs = setFieldDefLinkedValues(linkedField, getTrimText(valueObject.get("v").asText()), valueObject.get("__id").asText(), getTrimText(value),
+                                            tenant,valueId, fieldDefLinkedValueQueryBatchArgs,event);
+
+                                }
+                                else if (valueObject.get(linkedField.getLinkedFieldDefKey()).get("vl").isBoolean()) {
+                                    value = "" + valueObject.get(linkedField.getLinkedFieldDefKey()).get("vl").asBoolean();
+                                    fieldDefLinkedValueQueryBatchArgs = setFieldDefLinkedValues(linkedField, getTrimText(valueObject.get("v").asText()), valueObject.get("__id").asText(), getTrimText(value),
+                                            tenant,null, fieldDefLinkedValueQueryBatchArgs,event);
+                                }
+                            }
+                            else if (null != valueObject.get(linkedField.getLinkedFieldDefKey()).get("v") && valueObject.get(linkedField.getLinkedFieldDefKey()).get("v").has("v")){
+                                try{
+                                    value = "" + valueObject.get(linkedField.getLinkedFieldDefKey()).get("v").get("v").asDouble();
+                                }catch(Exception e){
+                                    value = valueObject.get(linkedField.getLinkedFieldDefKey()).get("v").get("v").asText();
+                                }
+                                fieldDefLinkedValueQueryBatchArgs = setFieldDefLinkedValues(linkedField, getTrimText(valueObject.get("v").asText()), valueObject.get("__id").asText(), getTrimText(value),
+                                        tenant,null, fieldDefLinkedValueQueryBatchArgs,event);
+                            }
+                            else if ( null != valueObject.get(linkedField.getLinkedFieldDefKey()) && null != valueObject.get(linkedField.getLinkedFieldDefKey()).get("v") && valueObject.get(linkedField.getLinkedFieldDefKey()).get("v").isArray()) {
+                                for (int i = 0; i < valueObject.get(linkedField.getLinkedFieldDefKey()).get("v").size(); i++) {
+                                    value = valueObject.get(linkedField.getLinkedFieldDefKey()).get("v").get(i).asText();
+                                    fieldDefLinkedValueQueryBatchArgs = setFieldDefLinkedValues(linkedField, getTrimText(valueObject.get("v").asText()), valueObject.get("__id").asText(), getTrimText(value),
+                                            tenant,null, fieldDefLinkedValueQueryBatchArgs,event);
+                                }
+                            }
+                            else if ( null != valueObject.get(linkedField.getLinkedFieldDefKey()) && null != valueObject.get(linkedField.getLinkedFieldDefKey()).get("v") && valueObject.get(linkedField.getLinkedFieldDefKey()).get("v").isTextual()) {
+                                value = valueObject.get(linkedField.getLinkedFieldDefKey()).get("v").asText();
+                                fieldDefLinkedValueQueryBatchArgs = setFieldDefLinkedValues(linkedField, getTrimText(valueObject.get("v").asText()), valueObject.get("__id").asText(), getTrimText(value),
+                                        tenant,null, fieldDefLinkedValueQueryBatchArgs,event);
+
+                            }
+                            else if ( null != valueObject.get(linkedField.getLinkedFieldDefKey()) && null != valueObject.get(linkedField.getLinkedFieldDefKey()).get("v") && valueObject.get(linkedField.getLinkedFieldDefKey()).get("v").isBoolean()) {
+                                value = "" + valueObject.get(linkedField.getLinkedFieldDefKey()).get("v").asBoolean();
+                                fieldDefLinkedValueQueryBatchArgs = setFieldDefLinkedValues(linkedField, getTrimText(valueObject.get("v").asText()), valueObject.get("__id").asText(), getTrimText(value),
+                                        tenant,null, fieldDefLinkedValueQueryBatchArgs,event);
+                            }
+                        }
+                    }
+					else {
+
+						if (valueObject.get("." + linkedField.getLinkedFieldDefKey()) != null
+								&& valueObject.get("." + linkedField.getLinkedFieldDefKey()).isTextual()) {
+							value = valueObject.get("." + linkedField.getLinkedFieldDefKey()).asText();
+							fieldDefLinkedValueQueryBatchArgs = setFieldDefLinkedValues(linkedField,
+									getTrimText(valueObject.get("v").asText()), valueObject.get("__id").asText(),
+									getTrimText(value), tenant,null, fieldDefLinkedValueQueryBatchArgs,event);
+						}
+						else
+						{
+							String linkedFieldDefKey = Character.toLowerCase(linkedField.getLinkedFieldDefKey().charAt(0)) + linkedField.getLinkedFieldDefKey().substring(1);
+							if (valueObject.get("." + linkedFieldDefKey) != null
+									&& valueObject.get("." + linkedFieldDefKey).isTextual()) {
+								value = valueObject.get("." + linkedFieldDefKey).asText();
+								fieldDefLinkedValueQueryBatchArgs = setFieldDefLinkedValues(linkedField,
+										getTrimText(valueObject.get("v").asText()), valueObject.get("__id").asText(),
+										getTrimText(value), tenant,null, fieldDefLinkedValueQueryBatchArgs,event);
+							}
+						}
+
+					}
+                }
+            }
+        }
+		return fieldDefLinkedValueQueryBatchArgs;
+	}
+
+    private String getTrimText(String value){
+        if(null != value && value.length() > 550){
+            return value.substring(0, 550);
+        }
+        return value;
+    }
+
+	List<Object[]> setFieldDefLinkedValues(FieldDefLinkedDefDTO linkedField, String fieldValue, String fieldId,
+			String value, String tenant, String valueId, List<Object[]> fieldDefLinkedValueQueryBatchArgs, String event)
+			throws SQLException {
+		if (event.equalsIgnoreCase("insert")) {
+			executeBatchAndClearArgsList(DocDefConstants.FIELD_DEF_LINKED_VALUE_QUERY,
+					fieldDefLinkedValueQueryBatchArgs);
+
+		}
+		fieldDefLinkedValueQueryBatchArgs.add(new Object[] { linkedField.getFieldDefId(), linkedField.getFieldDefKey(),
+				linkedField.getFieldDefLabel(), fieldValue, linkedField.getLinkedFieldDefId(),
+				linkedField.getLinkedFieldDefKey(), linkedField.getLinkedFieldDefLabel(), value, valueId, fieldId,
+				tenant });
+
+		return fieldDefLinkedValueQueryBatchArgs;
+	}
+
+    public void persistFieldValues(String tenant, JsonNode fieldValuesNode, Set<String> filterSet) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        List<FieldValueDTO> fieldValues = mapper.readValue(fieldValuesNode.toString(), new TypeReference<List<FieldValueDTO>>() {
+        });
+        List<Object[]> fieldValueBaseQueryBatchArgs = new ArrayList<>();
+        for (FieldValueDTO fieldValue : fieldValues) {//PlanParser.fieldValueResponse.getData()) {
+            executeBatchAndClearArgsList(DocDefConstants.FIELD_VALUE_BASE_QUERY, fieldValueBaseQueryBatchArgs);
+            Object strFieldValue = null;
+            if (filterSet.contains(fieldValue.getFieldDefinitionId())) {
+                Map<String, Object> map = mapper.convertValue(fieldValue.getValue(), Map.class);
+                strFieldValue = map.get("v");
+            } else {
+                strFieldValue = fieldValue.getValue();
+            }
+            fieldValueBaseQueryBatchArgs.add(new Object[]{fieldValue.getId(), strFieldValue, fieldValue.getFieldDefinitionId(),
+                    ((fieldValue.getParentId() != null) ? fieldValue.getParentId().substring(fieldValue.getParentId().lastIndexOf("/") + 1) : null), tenant});
+        }
+        jdbcTemplate.batchUpdate(DocDefConstants.FIELD_VALUE_BASE_QUERY, fieldValueBaseQueryBatchArgs);
+    }
+
+    public void persistTempFieldValues(FieldValuesDTO fieldValues, String tenant, Set<String> defIds) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        List<Object[]> fieldValueBaseQueryBatchArgs = new ArrayList<>();
+        for (FieldValueDTO fieldValue : fieldValues.getFieldValue()) {
+            executeBatchAndClearArgsList(DocDefConstants.FIELD_VALUE_TEMP_BASE_QUERY, fieldValueBaseQueryBatchArgs);
+            Object strFieldValue = null;
+            if (defIds.contains(fieldValue.getFieldDefinitionId())) {
+                Map<String, Object> map = mapper.convertValue(fieldValue.getValue(), Map.class);
+                strFieldValue = map.get("v");
+            } else {
+                strFieldValue = fieldValue.getValue();
+            }
+            fieldValueBaseQueryBatchArgs.add(new Object[]{fieldValue.getId(), strFieldValue, fieldValue.getFieldDefinitionId(),
+                    ((fieldValue.getParentId() != null) ? fieldValue.getParentId().substring(fieldValue.getParentId().lastIndexOf("/") + 1) : null), tenant});
+        }
+        jdbcTemplate.batchUpdate(DocDefConstants.FIELD_VALUE_TEMP_BASE_QUERY, fieldValueBaseQueryBatchArgs);
+    }
+
+	public void mergeFieldValues(String tenant, boolean isFieldValueUpdate, String id) {
+
+		if (isFieldValueUpdate && id!=null) {
+
+			try {
+				jdbcTemplate.update(
+						DocDefConstants.SINGLE_FIELD_VALUE_MERGE_SQL.replace("<TENANT>", tenant).replace("<ID>", id));
+			} finally {
+				jdbcTemplate.update(DocDefConstants.SINGLE_FIELD_VALUE_TEMP_CLEAR_SQL.replace("<TENANT>", tenant)
+						.replace("<ID>", id));
+			}
+
+		} else {
+			try {
+				jdbcTemplate.update(DocDefConstants.FIELD_VALUE_MERGE_SQL.replace("<TENANT>", tenant));
+			} finally {
+				jdbcTemplate.update(DocDefConstants.FIELD_VALUE_TEMP_CLEAR_SQL.replace("<TENANT>", tenant));
+			}
+
+		}
+	}
+
+    protected void persistTenantUsers(List<UserDTO> tenantUsers) throws Exception {
+        List<Object[]> userGeoQueryBatchArgs = new ArrayList<>();
+        List<Object[]> userCompanyQueryBatchArgs = new ArrayList<>();
+        List<Object[]> userBizQueryBatchArgs = new ArrayList<>();
+        List<Object[]> userGeoAllQueryBatchArgs = new ArrayList<>();
+        List<Object[]> userCompanyAllQueryBatchArgs = new ArrayList<>();
+        List<Object[]> userBizAllQueryBatchArgs = new ArrayList<>();
+
+        for (UserDTO user : tenantUsers) {
+
+            for (UserAttributesDTO geo : user.getGeography()) {
+                if (geo.getPropertyId().equals("true")) {
+                    executeBatchAndClearArgsList(DocDefConstants.USER_GEO_QUERY_ALL, userGeoAllQueryBatchArgs);
+                    userGeoAllQueryBatchArgs.add(new Object[] { "ALL", "ALL", user.getTenant(), user.getId() });
+                }
+                else {
+                    executeBatchAndClearArgsList(DocDefConstants.USER_GEO_QUERY, userGeoQueryBatchArgs);
+                    userGeoQueryBatchArgs.add(new Object[] { user.getId(), user.getTenant(), geo.getPropertyId() });
+                }
+            }
+            for (UserAttributesDTO comp : user.getCompany()) {
+                if (comp.getPropertyId().equals("true")) {
+                    executeBatchAndClearArgsList(DocDefConstants.USER_COMPANY_QUERY_ALL, userCompanyAllQueryBatchArgs);
+                    userCompanyAllQueryBatchArgs.add(new Object[] { "ALL", "ALL", user.getTenant(), user.getId() });
+                }
+                else {
+                    executeBatchAndClearArgsList(DocDefConstants.USER_COMPANY_QUERY, userCompanyQueryBatchArgs);
+                    userCompanyQueryBatchArgs.add(new Object[] { user.getId(), user.getTenant(), comp.getPropertyId() });
+                }
+            }
+            for (UserAttributesDTO biz : user.getBusiness()) {
+                if (biz.getPropertyId().equals("true")) {
+                    executeBatchAndClearArgsList(DocDefConstants.USER_BIZ_QUERY_ALL, userBizAllQueryBatchArgs);
+                    userBizAllQueryBatchArgs.add(new Object[] { "ALL", "ALL", user.getTenant(), user.getId() });
+                }
+                else {
+                    executeBatchAndClearArgsList(DocDefConstants.USER_BIZ_QUERY, userBizQueryBatchArgs);
+                    userBizQueryBatchArgs.add(new Object[] { user.getId(), user.getTenant(), biz.getPropertyId() });
+                }
+            }
+        }
+
+        jdbcTemplate.batchUpdate(DocDefConstants.USER_GEO_QUERY, userGeoQueryBatchArgs);
+        jdbcTemplate.batchUpdate(DocDefConstants.USER_COMPANY_QUERY, userCompanyQueryBatchArgs);
+        jdbcTemplate.batchUpdate(DocDefConstants.USER_BIZ_QUERY, userBizQueryBatchArgs);
+        jdbcTemplate.batchUpdate(DocDefConstants.USER_GEO_QUERY_ALL, userGeoAllQueryBatchArgs);
+        jdbcTemplate.batchUpdate(DocDefConstants.USER_COMPANY_QUERY_ALL, userCompanyAllQueryBatchArgs);
+        jdbcTemplate.batchUpdate(DocDefConstants.USER_BIZ_QUERY_ALL, userBizAllQueryBatchArgs);
+    }
+
+    public void executeBatchAndClearArgsList(String query, List<Object[]> args) {
+        if (!args.isEmpty() && args.size() == DocDefConstants.BATCH_SIZE) {
+            jdbcTemplate.batchUpdate(query, args);
+            args.clear();
+        }
+    }
+
+    public void updateFieldDefKeysToRemoveUnUsedCharsForNonHeirarchyOnly(String site){
+        jdbcTemplate.update(DocDefConstants.REPLACE_UNUSED_CHAR_FIELD_KEY_SQL, new Object[] {site});
+    }
+
+    public void logError(SiteConfiguration site, Long loadTimeMillis, Exception e)
+            throws NoSuchMethodException, IOException, IllegalAccessException, InvocationTargetException, SQLException {
+        Object[] errPlanDimQueryArgs = new Object[] { (site.getName() + DocDefConstants.METADATA), new Date(loadTimeMillis), ExceptionUtils.getStackTrace(e) };
+        jdbcTemplate.update(DocDefConstants.ERR_PLAN_DIM_QUERY, errPlanDimQueryArgs);
+    }
+
+	public void insertUserData(String userBaseQuery, List<Object[]> userBaseQueryBatchArgs) {
+        if((!userBaseQueryBatchArgs.isEmpty()) && null != userBaseQueryBatchArgs ){
+            jdbcTemplate.batchUpdate(DocDefConstants.USER_BASE_QUERY, userBaseQueryBatchArgs);
+        }
+    }
+
+    public List<String> getIntegerDatatypeFieldDefIds(String site){
+        return jdbcTemplate.queryForList(DocDefConstants.SELECT_FIELD_DEF_IDS_WITH_INTEGER_DATA_TYPE, new Object[]{site},String.class);
+    }
+}
