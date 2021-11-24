@@ -1,0 +1,25 @@
+package com.mediaocean.data.api.commons.type.dto;
+
+import org.codehaus.jackson.annotate.JsonProperty;
+import org.codehaus.jackson.annotate.JsonPropertyOrder;
+
+import javax.xml.bind.annotation.XmlAccessType;
+import javax.xml.bind.annotation.XmlAccessorType;
+import javax.xml.bind.annotation.XmlElement;
+
+
+@XmlAccessorType(XmlAccessType.FIELD)
+@JsonPropertyOrder({"id", "Type", "Number","IsPlacementDeleted" ,"MonthlyData"})
+public class DSPPlacementMonthlyDetail extends BasePlacementDetail{
+    @XmlElement(name = "MonthlyData")
+    @JsonProperty("MonthlyData")
+    private DSPMonthlyData monthlyData;
+
+    public DSPMonthlyData getMonthlyData() {
+        return monthlyData;
+    }
+
+    public void setMonthlyData(DSPMonthlyData monthlyData) {
+        this.monthlyData = monthlyData;
+    }
+}
