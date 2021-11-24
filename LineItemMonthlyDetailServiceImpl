@@ -1,0 +1,316 @@
+package com.mediaocean.data.api.commons.type.service.impl;
+
+import com.google.common.collect.Lists;
+import com.mediaocean.data.api.commons.dto.*;
+import com.mediaocean.data.api.commons.type.dao.LineItemMonthlyDetailsDao;
+import com.mediaocean.data.api.commons.type.dto.*;
+import com.mediaocean.data.api.commons.type.service.LineItemMonthlyDetailService;
+import org.apache.log4j.Logger;
+import org.codehaus.jackson.map.ObjectMapper;
+import org.codehaus.jackson.map.annotate.JsonSerialize;
+import org.springframework.beans.factory.annotation.Autowired;
+
+import javax.xml.bind.JAXBContext;
+import javax.xml.bind.Marshaller;
+import java.io.StringWriter;
+import java.text.DateFormat;
+import java.text.SimpleDateFormat;
+import java.util.*;
+import java.util.stream.Collectors;
+
+public class LineItemMonthlyDetailServiceImpl implements LineItemMonthlyDetailService {
+
+    private final Logger logger = Logger.getLogger(getClass());
+    @Autowired
+    private LineItemMonthlyDetailsDao lineItemMonthlyDetailsDao;
+
+    @Override
+    public String getResult(RequestDTO requestDTO) {
+        long startTime = System.currentTimeMillis();
+        logger.info("Start executeRadiaMonthlyDetailsQuery");
+        List<BaseMonthlyPlacement> baseMonthlyPlacements = lineItemMonthlyDetailsDao.executeRadiaMonthlyDetailsQuery(requestDTO.getExecutableQuery());
+        logger.info("End executeRadiaMonthlyDetailsQuery - " + ((System.currentTimeMillis() - startTime) / 1000) + " secs");
+        RadiaPlacementMonthlyDetails radiaPlacementMonthlyDetails = generatePlacementDetailsBasedOnType(baseMonthlyPlacements);
+        String xmlString = null;
+        try {
+            DataApiGenericDTO dataApiGenericDTO = new DataApiGenericDTO();
+            DataApiRequestDTO dataApiRequestDTO = new DataApiRequestDTO();
+            dataApiRequestDTO.setId(requestDTO.getRequestId());
+            dataApiRequestDTO.setTs(requestDTO.getRequestTimestamp().toString());
+            dataApiGenericDTO.setRequest(dataApiRequestDTO);
+
+            DataApiResponseDTO dataApiResponseDTO = new DataApiResponseDTO();
+            dataApiResponseDTO.setId(requestDTO.getResponseId());
+            dataApiResponseDTO.setTs(new Date().toString());
+            DataApiGenericDataDTO data = new DataApiGenericDataDTO();
+            data.setDataApiGenericData(radiaPlacementMonthlyDetails);
+            dataApiResponseDTO.setData(data);
+            dataApiGenericDTO.setResponse(dataApiResponseDTO);
+
+            if (requestDTO.getResponseFormat().equalsIgnoreCase("JSON")) {
+                ObjectMapper mapper = new ObjectMapper();
+                mapper.setSerializationInclusion(JsonSerialize.Inclusion.NON_NULL);
+                mapper.setSerializationInclusion(JsonSerialize.Inclusion.NON_EMPTY);
+
+                startTime = System.currentTimeMillis();
+                logger.info("Start mapper.writeValueAsString");
+                xmlString = new String(mapper.writeValueAsString(dataApiGenericDTO));
+                logger.info("End mapper.writeValueAsString - " + ((System.currentTimeMillis() - startTime) / 1000) + " secs");
+                startTime = System.currentTimeMillis();
+                logger.info("Start replace dataApiGenericData");
+                xmlString = xmlString.replaceFirst("dataApiGenericData", requestDTO.getXmlRootOpenTag());
+                logger.info("End replace dataApiGenericData - " + ((System.currentTimeMillis() - startTime) / 1000) + " secs");
+            } else {
+                StringWriter sw = new StringWriter();
+                JAXBContext jaxbContext = JAXBContext.newInstance(RadiaPlacementMonthlyDetails.class);
+                Marshaller marshaller1 = jaxbContext.createMarshaller();
+                marshaller1.setProperty(Marshaller.JAXB_FRAGMENT, Boolean.TRUE);
+                marshaller1.marshal(radiaPlacementMonthlyDetails, sw);
+                xmlString = sw.toString();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return xmlString;
+    }
+
+    private RadiaPlacementMonthlyDetails generatePlacementDetailsBasedOnType(List<BaseMonthlyPlacement> baseMonthlyPlacements) {
+        RadiaPlacementMonthlyDetails radiaPlacementMonthlyDetails = new RadiaPlacementMonthlyDetails();
+
+        List<MonthlyDetail> detailList = generateDetails(baseMonthlyPlacements);
+        if (detailList != null && !detailList.isEmpty()) {
+            MonthlyDetails details = new MonthlyDetails();
+            detailList.sort(Comparator.comparing(MonthlyDetail::getId));
+            details.setDetail(detailList);
+            radiaPlacementMonthlyDetails.setDetails(details);
+
+            List<DSPPlacementMonthlyDetail> dspPlacementMonthlyDetails = generateDSPPlacementMonthlyDetails(baseMonthlyPlacements.stream().filter(c -> c.getPackageType().equals("DSP")).collect(Collectors.toList()));
+            dspPlacementMonthlyDetails.sort(Comparator.comparing(DSPPlacementMonthlyDetail::getId));
+            radiaPlacementMonthlyDetails.setDspPlacementMonthlyDetails(dspPlacementMonthlyDetails);
+
+            List<FeeOrderPlacementMonthlyDetail> feeOrderPlacementMonthlyDetails = generateFeeOrderPlacementMonthlyDetails(baseMonthlyPlacements.stream().filter(c -> c.getPackageType().equals("FeeOrder")).collect(Collectors.toList()));
+            feeOrderPlacementMonthlyDetails.sort(Comparator.comparing(FeeOrderPlacementMonthlyDetail::getId));
+            radiaPlacementMonthlyDetails.setFeeOrderPlacementMonthlyDetails(feeOrderPlacementMonthlyDetails);
+
+            List<PackagePlacementMonthlyDetail> packagePlacementMonthlyDetails = generatePackagePlacementMonthlyDetails(baseMonthlyPlacements.stream().filter(c -> c.getPackageType().equals("Package")).collect(Collectors.toList()));
+            packagePlacementMonthlyDetails.sort(Comparator.comparing(PackagePlacementMonthlyDetail::getId));
+            radiaPlacementMonthlyDetails.setPackagePlacementMonthlyDetail(packagePlacementMonthlyDetails);
+
+            List<StandalonePlacementMonthlyDetail> standalonePlacementMonthlyDetail = generateStandalonePlacementMonthlyDetails(baseMonthlyPlacements.stream().filter(c -> c.getPackageType().equals("Standalone")).collect(Collectors.toList()));
+            standalonePlacementMonthlyDetail.sort(Comparator.comparing(StandalonePlacementMonthlyDetail::getId));
+            radiaPlacementMonthlyDetails.setStandalonePlacementMonthlyDetail(standalonePlacementMonthlyDetail);
+
+            List<TradingDeskPlacementMonthlyDetail> tradingDeskPlacementMonthlyDetail = generateTradingDeskPlacementMonthlyDetails(baseMonthlyPlacements.stream().filter(c -> c.getPackageType().equals("TradingDesk")).collect(Collectors.toList()));
+            tradingDeskPlacementMonthlyDetail.sort(Comparator.comparing(TradingDeskPlacementMonthlyDetail::getId));
+            radiaPlacementMonthlyDetails.setTradingDeskPlacementMonthlyDetail(tradingDeskPlacementMonthlyDetail);
+        }
+        return radiaPlacementMonthlyDetails;
+    }
+
+    private List<DSPPlacementMonthlyDetail> generateDSPPlacementMonthlyDetails(List<BaseMonthlyPlacement> baseMonthlyPlacements) {
+        List<DSPPlacementMonthlyDetail> dspPlacementMonthlyDetails = Lists.newArrayList();
+        Map<Long, List<BaseMonthlyPlacement>> groupByPlacementId = baseMonthlyPlacements.stream().collect(Collectors.groupingBy(BaseMonthlyPlacement::getPlacementId));
+        for (Map.Entry<Long, List<BaseMonthlyPlacement>> monthlyPlacement : groupByPlacementId.entrySet()) {
+            DSPPlacementMonthlyDetail dspPlacementMonthlyDetail = new DSPPlacementMonthlyDetail();
+            List<DSPMonthDetail> dspMonthDetailList = new ArrayList<>();
+            DSPMonthlyData dspmonthlyData = new DSPMonthlyData();
+            dspPlacementMonthlyDetail.setId(monthlyPlacement.getKey());
+            monthlyPlacement.getValue().stream().forEach(monthlyData -> {
+                dspPlacementMonthlyDetail.setNumber(monthlyData.getPlacementNumber());
+                dspPlacementMonthlyDetail.setIsPlacementDeleted(monthlyData.getIsPlacementDeleted());
+                DSPMonthDetail dspMonthDetail = new DSPMonthDetail();
+                populateAllAtrributes(dspMonthDetail,monthlyData);
+                dspMonthDetailList.add(dspMonthDetail);
+            });
+            dspMonthDetailList.sort(Comparator.comparing(DSPMonthDetail::getPlacementMonthlyStartDate));
+            dspmonthlyData.setMonth(dspMonthDetailList);
+            dspPlacementMonthlyDetail.setMonthlyData(dspmonthlyData);
+            dspPlacementMonthlyDetails.add(dspPlacementMonthlyDetail);
+        }
+        return dspPlacementMonthlyDetails;
+    }
+
+    private List<FeeOrderPlacementMonthlyDetail> generateFeeOrderPlacementMonthlyDetails(List<BaseMonthlyPlacement> baseMonthlyPlacements) {
+        List<FeeOrderPlacementMonthlyDetail> feeOrderPlacementMonthlyDetails = Lists.newArrayList();
+        Map<Long, List<BaseMonthlyPlacement>> groupByPlacementId = baseMonthlyPlacements.stream().collect(Collectors.groupingBy(BaseMonthlyPlacement::getPlacementId));
+        for (Map.Entry<Long, List<BaseMonthlyPlacement>> monthlyPlacement : groupByPlacementId.entrySet()) {
+            FeeOrderPlacementMonthlyDetail feeOrderPlacementMonthlyDetail = new FeeOrderPlacementMonthlyDetail();
+            FeeOrderMonthlyData feeOrderMonthlyData = new FeeOrderMonthlyData();
+            List<FeeOrderMonthDetail> feeOrderMonthDetailList = new ArrayList<>();
+            feeOrderPlacementMonthlyDetail.setId(monthlyPlacement.getKey());
+            monthlyPlacement.getValue().stream().forEach(monthlyData -> {
+                feeOrderPlacementMonthlyDetail.setNumber(monthlyData.getPlacementNumber());
+                feeOrderPlacementMonthlyDetail.setIsPlacementDeleted(monthlyData.getIsPlacementDeleted());
+                FeeOrderMonthDetail feeOrderMonthDetail = new FeeOrderMonthDetail();
+                populateAllAtrributes(feeOrderMonthDetail,monthlyData);
+                feeOrderMonthDetailList.add(feeOrderMonthDetail);
+            });
+            feeOrderMonthDetailList.sort(Comparator.comparing(FeeOrderMonthDetail::getPlacementMonthlyStartDate));
+            feeOrderMonthlyData.setMonth(feeOrderMonthDetailList);
+            feeOrderPlacementMonthlyDetail.setMonthlyData(feeOrderMonthlyData);
+            feeOrderPlacementMonthlyDetails.add(feeOrderPlacementMonthlyDetail);
+        }
+        return feeOrderPlacementMonthlyDetails;
+    }
+
+    private List<PackagePlacementMonthlyDetail> generatePackagePlacementMonthlyDetails(List<BaseMonthlyPlacement> baseMonthlyPlacements) {
+        List<PackagePlacementMonthlyDetail> packagePlacementMonthlyDetails = Lists.newArrayList();
+        Map<Long, List<BaseMonthlyPlacement>> groupByPlacementId = baseMonthlyPlacements.stream().collect(Collectors.groupingBy(BaseMonthlyPlacement::getPlacementId));
+        for (Map.Entry<Long, List<BaseMonthlyPlacement>> monthlyPlacement : groupByPlacementId.entrySet()) {
+            PackagePlacementMonthlyDetail packagePlacementMonthlyDetail = new PackagePlacementMonthlyDetail();
+            PackageMonthlyData packageMonthlyData = new PackageMonthlyData();
+            List<PackageMonthDetail> packageMonthDetailList = new ArrayList<>();
+            packagePlacementMonthlyDetail.setId(monthlyPlacement.getKey());
+            monthlyPlacement.getValue().stream().forEach(monthlyData -> {
+                packagePlacementMonthlyDetail.setNumber(monthlyData.getPlacementNumber());
+                packagePlacementMonthlyDetail.setIsPlacementDeleted(monthlyData.getIsPlacementDeleted());
+                packagePlacementMonthlyDetail.setType(monthlyData.getPackageType());
+                PackageMonthDetail packageMonthDetail = new PackageMonthDetail();
+                populateAllAtrributes(packageMonthDetail,monthlyData);
+                packageMonthDetailList.add(packageMonthDetail);
+            });
+            packageMonthDetailList.sort(Comparator.comparing(PackageMonthDetail::getPlacementMonthlyStartDate));
+            packageMonthlyData.setMonth(packageMonthDetailList);
+            packagePlacementMonthlyDetail.setMonthlyData(packageMonthlyData);
+            packagePlacementMonthlyDetails.add(packagePlacementMonthlyDetail);
+        }
+        return packagePlacementMonthlyDetails;
+    }
+
+    private List<StandalonePlacementMonthlyDetail> generateStandalonePlacementMonthlyDetails(List<BaseMonthlyPlacement> baseMonthlyPlacements) {
+        List<StandalonePlacementMonthlyDetail> standalonePlacementMonthlyDetails = Lists.newArrayList();
+        Map<Long, List<BaseMonthlyPlacement>> groupByPlacementId = baseMonthlyPlacements.stream().collect(Collectors.groupingBy(BaseMonthlyPlacement::getPlacementId));
+        for (Map.Entry<Long, List<BaseMonthlyPlacement>> monthlyPlacement : groupByPlacementId.entrySet()) {
+            StandalonePlacementMonthlyDetail standalonePlacementMonthlyDetail = new StandalonePlacementMonthlyDetail();
+            StandaloneMonthlyData standaloneMonthlyData = new StandaloneMonthlyData();
+            List<StandaloneMonthDetail> standaloneMonthDetailList = new ArrayList<>();
+            standalonePlacementMonthlyDetail.setId(monthlyPlacement.getKey());
+            monthlyPlacement.getValue().stream().forEach(monthlyData -> {
+                standalonePlacementMonthlyDetail.setNumber(monthlyData.getPlacementNumber());
+                standalonePlacementMonthlyDetail.setIsPlacementDeleted(monthlyData.getIsPlacementDeleted());
+                StandaloneMonthDetail standaloneMonthDetail = new StandaloneMonthDetail();
+                populateAllAtrributes(standaloneMonthDetail,monthlyData);
+                standaloneMonthDetailList.add(standaloneMonthDetail);
+            });
+            standaloneMonthDetailList.sort(Comparator.comparing(StandaloneMonthDetail::getPlacementMonthlyStartDate));
+            standaloneMonthlyData.setMonth(standaloneMonthDetailList);
+            standalonePlacementMonthlyDetail.setMonthlyData(standaloneMonthlyData);
+            standalonePlacementMonthlyDetails.add(standalonePlacementMonthlyDetail);
+        }
+        return standalonePlacementMonthlyDetails;
+    }
+
+    private List<TradingDeskPlacementMonthlyDetail> generateTradingDeskPlacementMonthlyDetails(List<BaseMonthlyPlacement> baseMonthlyPlacements) {
+        List<TradingDeskPlacementMonthlyDetail> tradingDeskPlacementMonthlyDetails = Lists.newArrayList();
+        Map<Long, List<BaseMonthlyPlacement>> groupByPlacementId = baseMonthlyPlacements.stream().collect(Collectors.groupingBy(BaseMonthlyPlacement::getPlacementId));
+        for (Map.Entry<Long, List<BaseMonthlyPlacement>> monthlyPlacement : groupByPlacementId.entrySet()) {
+            TradingDeskPlacementMonthlyDetail tradingDeskPlacementMonthlyDetail = new TradingDeskPlacementMonthlyDetail();
+            TradingDeskMonthlyData tradingDeskMonthlyData = new TradingDeskMonthlyData();
+            List<TradingDeskMonthDetail> tradingDeskMonthDetailList = new ArrayList<>();
+            tradingDeskPlacementMonthlyDetail.setId(monthlyPlacement.getKey());
+            monthlyPlacement.getValue().stream().forEach(monthlyData -> {
+                tradingDeskPlacementMonthlyDetail.setNumber(monthlyData.getPlacementNumber());
+                tradingDeskPlacementMonthlyDetail.setIsPlacementDeleted(monthlyData.getIsPlacementDeleted());
+                TradingDeskMonthDetail tradingDeskMonthDetail = new TradingDeskMonthDetail();
+                populateAllAtrributes(tradingDeskMonthDetail,monthlyData);
+                tradingDeskMonthDetailList.add(tradingDeskMonthDetail);
+            });
+            tradingDeskMonthDetailList.sort(Comparator.comparing(TradingDeskMonthDetail::getPlacementMonthlyStartDate));
+            tradingDeskMonthlyData.setMonth(tradingDeskMonthDetailList);
+            tradingDeskPlacementMonthlyDetail.setMonthlyData(tradingDeskMonthlyData);
+            tradingDeskPlacementMonthlyDetails.add(tradingDeskPlacementMonthlyDetail);
+        }
+        return tradingDeskPlacementMonthlyDetails;
+    }
+
+    private List<MonthlyDetail> generateDetails(List<BaseMonthlyPlacement> baseMonthlyPlacements) {
+        List<MonthlyDetail> details = new ArrayList<>();
+        Map<Long, List<BaseMonthlyPlacement>> groupByDetailId = baseMonthlyPlacements.stream().filter(p -> null != p.getDetailId()).collect(Collectors.groupingBy(BaseMonthlyPlacement::getDetailId));
+        for (Map.Entry<Long, List<BaseMonthlyPlacement>> baseMonthlyPlacement : groupByDetailId.entrySet()) {
+            MonthlyDetail detail = new MonthlyDetail();
+            for (BaseMonthlyPlacement baseMonthly : baseMonthlyPlacement.getValue()) {
+
+                Advertiser advertiser = new Advertiser();
+                advertiser.setBusinessKey(baseMonthly.getAdvertiserBusinesskey());
+                advertiser.setCode(baseMonthly.getAdvertiserCode());
+
+                Product product = new Product();
+                product.setBusinessKey(baseMonthly.getProductBusinesskey());
+                product.setCode(baseMonthly.getProductCode());
+
+                Estimate estimate = new Estimate();
+                estimate.setBusinessKey(baseMonthly.getEstimateBusinesskey());
+                estimate.setCode(baseMonthly.getEstimateCode());
+
+                detail.setId(Long.valueOf(baseMonthlyPlacement.getKey()));
+                detail.setBuyType(baseMonthly.getBuyType());
+                detail.setCampaignID(baseMonthly.getCampaignId());
+                detail.setMediaCode(baseMonthly.getMediaCode());
+
+                if (advertiser.isElementNull() == 0) {
+                    detail.setAdvertiser(advertiser);
+                }
+                if (product.isElementNull() == 0) {
+                    detail.setProduct(product);
+                }
+                if (estimate.isElementNull() == 0) {
+                    detail.setEstimate(estimate);
+                }
+            }
+            details.add(detail);
+        }
+        return details;
+    }
+
+    private String formatDateValue(String dateValue) {
+        String formattedDate = "";
+        DateFormat outputFormat = new SimpleDateFormat("MMM-yyyy");
+        DateFormat inputFormat = new SimpleDateFormat("yyyy-MM-dd");
+        Date date = null;
+        try {
+            if (null != dateValue) {
+                date = inputFormat.parse(dateValue);
+                formattedDate = outputFormat.format(date).toUpperCase();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return formattedDate;
+    }
+
+    private void populateAllAtrributes(BaseMonthDetail baseMonthDetail,BaseMonthlyPlacement monthlyData){
+        if(null!= baseMonthDetail && null != monthlyData) {
+            baseMonthDetail.setValue(formatDateValue(monthlyData.getMonthBeginDate()));
+            baseMonthDetail.setDetailId(monthlyData.getDetailId());
+            baseMonthDetail.setEarlyEndDate(monthlyData.getEarlyEndDate());
+            baseMonthDetail.setLateStartDate(monthlyData.getLateStartDate());
+            baseMonthDetail.setPlacementMonthlyStartDate(monthlyData.getPlacementMonthlyStartDate());
+            baseMonthDetail.setPlacementMonthlyEndDate(monthlyData.getPlacementMonthlyEndDate());
+            baseMonthDetail.setPlannedAmount(monthlyData.getPlannedAmount());
+            baseMonthDetail.setPlannedUnits(monthlyData.getPlannedUnits());
+            baseMonthDetail.setPlannedActions(monthlyData.getPlannedActions());
+            baseMonthDetail.setiOAmount(monthlyData.getIOAmount());
+            baseMonthDetail.setApprovedUnits(monthlyData.getApprovedUnits());
+            baseMonthDetail.setTotalRemainingAmount(monthlyData.getTotalRemainingAmount());
+            baseMonthDetail.setTotalRemainingUnits(monthlyData.getTotalRemainingUnits());
+            baseMonthDetail.setMediaPayable(monthlyData.getMediaPayable());
+            baseMonthDetail.setBillableCost(monthlyData.getBillableCost());
+            baseMonthDetail.setPlannedClicks(monthlyData.getPlannedClicks());
+            baseMonthDetail.setPlannedImpressions(monthlyData.getPlannedImpressions());
+            baseMonthDetail.setBillableActualizedCost(monthlyData.getBillableActualizedCost());
+            baseMonthDetail.setPlannedBillableUnits(monthlyData.getPlannedBillableUnits());
+            baseMonthDetail.setPlannedMargin(monthlyData.getPlannedMargin());
+            baseMonthDetail.setActualizedCost(monthlyData.getActualizedCost());
+            baseMonthDetail.setApprovedAmount(monthlyData.getApprovedAmount());
+            baseMonthDetail.setApprovedSource(monthlyData.getApprovedSource());
+            baseMonthDetail.setOriginalAmount(monthlyData.getOriginalAmount());
+            baseMonthDetail.setPlannedFees(monthlyData.getPlannedFees());
+            baseMonthDetail.setBillablePlannedFees(monthlyData.getBillablePlannedFees());
+            baseMonthDetail.setCostingKPI(monthlyData.getCostingKPI());
+            if(null!= monthlyData.getCostingKPI()){
+                baseMonthDetail.setCostingKPIValue(monthlyData.getCostingKPIValue());
+            }
+
+        }
+    }
+}
