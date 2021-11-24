@@ -1,0 +1,197 @@
+package com.mediaocean.bi.cmdw.sync.mmp;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mediaocean.bi.cmdw.sync.mmp.amqp.IncrementalPlanMessagePublisher;
+import com.mediaocean.bi.cmdw.sync.mmp.amqp.PlanMessagePublisher;
+import com.mediaocean.bi.cmdw.sync.mmp.external.PlanRevisionDTO;
+import com.mediaocean.bi.cmdw.sync.mmp.external.percentallocation.ConfigurationDTO;
+import com.mediaocean.bi.cmdw.sync.mmp.service.IncrementPlanProcessing;
+import com.mediaocean.bi.cmdw.sync.mmp.sql.constants.SQLConstants;
+import com.mediaocean.bi.cmdw.sync.mmp.util.ErrorLogUtilV3;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.io.InputStream;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
+
+public class PlanDownloadTask implements Supplier<Optional<PlanProcessPayLoad>> {
+
+    private static final int MAX_RETRY = 3;
+    SiteConfiguration site;
+    Long incrementStartTime;
+    String logfileTimestamp;
+    AtomicInteger counter_503_error;
+    List<PlanRevisionDTO> dbRevisionsMap;
+    String planId;
+    PlanMessagePublisher planMessagePublisher;
+    IncrementalPlanMessagePublisher incrementalPlanMessagePublisher;
+    String logPathFileName;
+    boolean isFullLoad;
+    boolean isPlanProcessingFromQueue;
+    boolean isFullPlanProcessEnable;
+    Set<String> tobeDeletedPlanRevisions;
+    private MMPProxyService mmpProxyService;
+    private SiteServiceV4 siteService;
+    private PlanResponseHandler planResponseHandler;
+    private PlanRepositoryV4 planRepositoryV4;
+    private ConfigurationDTO config;
+    private IncrementPlanProcessing incrementPlanProcessing;
+    private ErrorLogUtilV3 errorLog;
+    private String siteCurrency;
+    private boolean isMultipleCurrencyEnabled;
+    private Logger LOG = LoggerFactory.getLogger(PlanDownloadTask.class);
+
+    public PlanDownloadTask(SiteConfiguration site, Long incrementStartTime, String logfileTimestamp,
+                            AtomicInteger counter_503_error, List<PlanRevisionDTO> dbRevisionsMap, String planId,
+                            MMPProxyService mmpProxyService, SiteServiceV4 siteService, PlanMessagePublisher planMessagePublisher,
+                            IncrementalPlanMessagePublisher incrementalPlanMessagePublisher, PlanResponseHandler planResponseHandler, String logPathFileName, boolean isFullLoad,
+                            Set<String> tobeDeletedPlanRevisions, PlanRepositoryV4 repositoryV4, ConfigurationDTO config,
+                            IncrementPlanProcessing incrementPlanProcessing, ErrorLogUtilV3 errorLog, boolean isFullPlanProcessEnable, boolean isPlanProcessingFromQueue, String siteCurrency, boolean isMultipleCurrencyEnabled) {
+
+        this.site = site;
+        this.planId = planId;
+        this.incrementStartTime = incrementStartTime;
+        this.logfileTimestamp = logfileTimestamp;
+        this.counter_503_error = counter_503_error;
+        this.dbRevisionsMap = dbRevisionsMap;
+        this.mmpProxyService = mmpProxyService;
+        this.siteService = siteService;
+        this.planMessagePublisher = planMessagePublisher;
+        this.incrementalPlanMessagePublisher = incrementalPlanMessagePublisher;
+        this.planResponseHandler = planResponseHandler;
+        this.logPathFileName = logPathFileName;
+        this.isFullLoad = isFullLoad;
+        this.tobeDeletedPlanRevisions = tobeDeletedPlanRevisions;
+        this.planRepositoryV4 = repositoryV4;
+        this.config = config;
+        this.incrementPlanProcessing = incrementPlanProcessing;
+        this.errorLog = errorLog;
+        this.isFullPlanProcessEnable = isFullPlanProcessEnable;
+        this.isPlanProcessingFromQueue = isPlanProcessingFromQueue;
+        this.siteCurrency = siteCurrency;
+        this.isMultipleCurrencyEnabled = isMultipleCurrencyEnabled;
+    }
+
+    @Override
+    public Optional<PlanProcessPayLoad> get() {
+        int attempt = 1;
+        PlanProcessPayLoad requestPayLoad = null;
+        while (requestPayLoad == null && attempt <= MAX_RETRY) {
+            requestPayLoad = downloadPlan(requestPayLoad);
+            attempt++;
+        }
+        return requestPayLoad != null ? Optional.of(requestPayLoad) : Optional.empty();
+    }
+
+    private PlanProcessPayLoad downloadPlan(PlanProcessPayLoad requestPayLoad) {
+        Map<String, JsonNode> responseMap = new ConcurrentHashMap<>();
+        ObjectMapper objectMapper = new ObjectMapper();
+        JsonNode data = null;
+        long t0 = System.nanoTime();
+        String siteName = site.getName();
+        try {
+            List<String> revisionList = new ArrayList<>();
+            revisionList.add(this.planId);
+            InputStream mediaPlan = null;
+            if (site.isMultipleCurrencyProcessingEnable()) {
+                mediaPlan = mmpProxyService.getMediaPlansWithOutputCurrencies(site, this.planId);
+            } else {
+                mediaPlan = mmpProxyService.getMediaPlans(site, this.planId);
+            }
+            if (mediaPlan != null) {
+                try {
+                    data = objectMapper.readValue(mediaPlan, JsonNode.class).get("data");
+                } catch (Exception e) {
+                    LOG.info("Exception while fetching data against plan {} from Lumina site {}", planId, siteName);
+                    errorLog.logError(e, siteName, planId);
+                    return null;
+                }
+                if (data.size() == 0) {
+                    LOG.info("No data against this plan {} from Lumina site {}", planId, siteName);
+                    String sql = SQLConstants.PlanRepositoryConstants.DELETE_PROCESSABLE_PLAN_SQL;
+                    sql = sql.replace("<PLAN_ID>", planId);
+                    planRepositoryV4.executePlanProcessSQLs(siteName, sql);
+                    return null;
+                }
+                responseMap.put(this.planId, data);
+                if (dbRevisionsMap == null || isFullPlanProcessEnable) {
+                    dbRevisionsMap = new ArrayList<>();
+                }
+                if (tobeDeletedPlanRevisions == null || isFullPlanProcessEnable) {
+                    tobeDeletedPlanRevisions = new HashSet<>();
+                }
+                requestPayLoad = siteService.getPlanProcessPayLoad(site, this.counter_503_error, dbRevisionsMap,
+                        this.planId, data, responseMap, revisionList, tobeDeletedPlanRevisions);
+                requestPayLoad.setLogFileName(logPathFileName);
+                requestPayLoad.setIncrementStartTime(incrementStartTime);
+                requestPayLoad.setLogFileTimeStamp(logfileTimestamp);
+                requestPayLoad.setExcludeRelatedFields(site.getRelatedFieldsData());
+                requestPayLoad.setFullLoad(isFullLoad);
+                requestPayLoad.setConfigDTO(config);
+                requestPayLoad.setFullPlanProcessingEnable(isFullPlanProcessEnable);
+                requestPayLoad.setPlanProcessingFromQueue(isPlanProcessingFromQueue);
+                requestPayLoad.setLengthAdjustableFields(site.getLengthAdjustableFieldsData());
+                requestPayLoad.setSiteCurrency(siteCurrency);
+                requestPayLoad.setIsMultipleCurrencyEnabled(isMultipleCurrencyEnabled);
+
+                if (isFullPlanProcessEnable) {
+                    int count = planRepositoryV4.getFieldValueFlagCount(planId, site.getName());
+                    requestPayLoad.setFieldValueFlagCount(count);
+                } else {
+                    requestPayLoad.setFieldValueFlagCount(0);
+                }
+
+
+                if ((!isFullPlanProcessEnable && !isFullLoad) && !planRepositoryV4.versionNeedProcessing(requestPayLoad)) {
+                    errorLog.logError(new Exception("Plan processing skipped because latest version is already in DB"), site.getName(), planId);
+                    planRepositoryV4.removeForMMPProcessedPlan(planId, siteName, requestPayLoad.getIncrementStartTime());
+                    LOG.info("Plan processing skipped plan {}, site {}, payload latest rev. {}", planId, siteName,
+                            requestPayLoad.getLatestRevision());
+                    String sql = SQLConstants.PlanRepositoryConstants.DELETE_PROCESSABLE_PLAN_SQL;
+                    sql = sql.replace("<PLAN_ID>", planId);
+                    planRepositoryV4.executePlanProcessSQLs(siteName, sql);
+                    return null;
+                }
+                if (requestPayLoad != null && planResponseHandler.savePlanResponse(requestPayLoad, responseMap,
+                        incrementStartTime, logfileTimestamp, site)) {
+
+                    if (!isPlanProcessingFromQueue) {
+                        if (isFullLoad) {
+                            planMessagePublisher.publish(requestPayLoad);
+                        } else {
+                            incrementalPlanMessagePublisher.publish(requestPayLoad);
+                        }
+
+                    } else {
+                        String messageKey = UUID.randomUUID().toString();
+                        LOG.info("Incremental running for plan {} for site {}", planId,
+                                siteName);
+                        incrementPlanProcessing.planProcess(requestPayLoad, messageKey, logPathFileName);
+                    }
+                } else {
+                    requestPayLoad = null;
+                }
+            }
+        } catch (Exception e) {
+            errorLog.logError(e, site.getName(), planId);
+            LOG.info("Exception while fetching planResonse, Error: {}", e);
+            if (planRepositoryV4.checkExistanceOfPlanInDB(site.getName(), planId)) {
+                planRepositoryV4.removeForMMPProcessedPlan(site.getName(), planId, incrementStartTime);
+            }
+            requestPayLoad = null;
+        } finally {
+            if (requestPayLoad == null) {
+                LOG.info(" Request Payload is null");
+            } else {
+                if (!isPlanProcessingFromQueue) {
+                    LOG.info("Downloaded successfully & published message for plan id = {} for site {}", planId, siteName);
+                }
+            }
+        }
+        return requestPayLoad;
+    }
+}
