@@ -1,0 +1,204 @@
+package com.mediaocean.bi.cmdw.sync.mmp.bulkapi;
+
+import com.mediaocean.bi.cmdw.sync.mmp.SiteConfiguration;
+import com.mediaocean.bi.cmdw.sync.mmp.bulkapi.constants.BDSetupConstants;
+import com.mediaocean.bi.cmdw.sync.mmp.external.BDExtractColumns;
+import com.mediaocean.bi.cmdw.sync.mmp.util.SQLStringEscapeUtil;
+
+import org.apache.commons.collections.CollectionUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import javax.annotation.PostConstruct;
+import javax.annotation.Resource;
+import javax.sql.DataSource;
+
+@Component
+public class BDSetup {
+
+    private static final Logger LOG = LoggerFactory.getLogger(BDSetup.class);
+    public static final String SITE_CURR = "SITE CURR ";
+    public static final String SITE_CURR_V2 = "Site Curr ";
+    public static final String CURR = " CURR ";
+    public static final String CURR_V2 = " Curr ";
+    public static final String COSTINCURR_PLAN = "costincurr_plan";
+    public static final String COSTINCURR_SITE = "costincurr_site";
+    public static final String COSTINCURR_ = "costincurr_";
+    public static final String SYSTEM = "system";
+    public static final String CURRENCY = "Currency";
+    private static final String CURRENCY_COLUMNS_FOR_LEGOIPG_AUTH_SUBFLIGHT_VIEW = " cost_to_client , net_cost , gross_cost";
+
+    @Resource(name = "biDataSource")
+    private DataSource biDataSource;
+
+    @Resource(name = "dwhDataSource")
+    private DataSource dwhDataSource;
+
+    private JdbcTemplate biJdbcTemplate;
+    private JdbcTemplate cmdwJdbcTemplate;
+
+    @PostConstruct
+    public void init() throws Exception {
+        biJdbcTemplate = new JdbcTemplate(biDataSource);
+        cmdwJdbcTemplate = new JdbcTemplate(dwhDataSource);
+    }
+
+    public void handleBDSetup(SiteConfiguration site) throws Exception {
+
+        String tenant = site.getName();
+        StringBuffer services = new StringBuffer();
+        biJdbcTemplate.query(BDSetupConstants.BD_EXTRACT_LOOKUPS, (row) -> {
+            services.append(",'" + tenant + "_" + row.getString(2) + "'");
+        });
+
+        String serviceClause = services.substring(1).toLowerCase();
+        String provider = "MMP_" + tenant.toUpperCase();
+        List<BDExtractColumns> columns = new ArrayList<>();
+        String sql = BDSetupConstants.BD_EXTRACT_COLUMN_FIELDS.replace("<TABLE_NAMES>", serviceClause).replace("<TENANT>", tenant.toUpperCase());
+        boolean isProcessingNeededForMultiCurrency = site.isMultipleCurrencyProcessingEnable() && CollectionUtils.isNotEmpty(site.getOutputCurrenciesForProcessing());
+        cmdwJdbcTemplate.query(sql, (row) -> {
+            processCurrencyRelatedColumn(site, provider, columns, row, isProcessingNeededForMultiCurrency);
+        });
+
+        biJdbcTemplate.update(BDSetupConstants.BD_EXTRACT_COLUMN_TEMP_DELETE, provider);
+
+        cmdwJdbcTemplate.query(BDSetupConstants.BD_EXTRACT_COLUMN_RELATED_FIELDS.replace("<TENANT>", tenant.toUpperCase()), (row) -> {
+            if (row.getString(4).equals("1")) {
+                columns.add(new BDExtractColumns("media_plan", "r_" + row.getString(1) + "." + row.getString(2), provider, row.getString(7) + " " + row.getString(3),
+                        row.getString(4)));
+            }
+            if (row.getString(5).equals("1")) {
+                columns.add(
+                        new BDExtractColumns("flight", "r_" + row.getString(1) + "." + row.getString(2), provider, row.getString(7) + " " + row.getString(3), row.getString(4)));
+            }
+            if (row.getString(6).equals("1")) {
+                columns.add(new BDExtractColumns("sub_flight", "r_" + row.getString(1) + "." + row.getString(2), provider, row.getString(7) + " " + row.getString(3),
+                        row.getString(4)));
+                columns.add(new BDExtractColumns("authorized_subflight", "r_" + row.getString(1) + "." + row.getString(2), provider, row.getString(7) + " " + row.getString(3),
+                        row.getString(4)));
+            }
+        });
+
+        insertBDExtractColumns(columns, site, provider, biJdbcTemplate);
+    }
+
+    private void processCurrencyRelatedColumn(SiteConfiguration site, String provider, List<BDExtractColumns> columns, ResultSet row, boolean isProcessingNeededForMultiCurrency) throws SQLException {
+        columns.add(new BDExtractColumns(row.getString(1), row.getString(2), provider, row.getString(3), row.getString(4)));
+        if (isProcessingNeededForMultiCurrency && null != row.getString(4) && row.getString(4).equalsIgnoreCase(CURRENCY) && !row.getString(2).toLowerCase().startsWith("w_")) {
+            for (String outputCurrency : site.getOutputCurrenciesForProcessing()) {
+                String parmeterName = row.getString(2);
+                if (outputCurrency.equalsIgnoreCase(SYSTEM)) {
+                    columns.add(
+                            new BDExtractColumns(row.getString(1), String.format(COSTINCURR_SITE + ".%s", parmeterName), provider, SITE_CURR + row.getString(3), row.getString(4)));
+                }
+                else {
+                    columns.add(new BDExtractColumns(row.getString(1), String.format(COSTINCURR_ + outputCurrency + ".%s", parmeterName), provider,
+                            outputCurrency + CURR + row.getString(3), row.getString(4)));
+                }
+            }
+        }
+        columns.removeIf(c -> (c.getName().equalsIgnoreCase(COSTINCURR_PLAN) || c.getName().equalsIgnoreCase(COSTINCURR_SITE) ||
+                (site.getName().equalsIgnoreCase("LEGOIPG") && c.getService().equalsIgnoreCase("authorized_sub_flight") &&
+                        ((c.getName().equalsIgnoreCase("COSTINCURR_SITE_COST_TO_CLIENT") && c.getDisplayName().equalsIgnoreCase("COSTINCURR_SITE_COST_TO_CLIENT") )
+                                || (c.getName().equalsIgnoreCase("COSTINCURR_SITE_NET_COST") && c.getDisplayName().equalsIgnoreCase("COSTINCURR_SITE_NET_COST"))
+                                || (c.getName().equalsIgnoreCase("COSTINCURR_SITE_GROSS_COST") && c.getDisplayName().equalsIgnoreCase("COSTINCURR_SITE_GROSS_COST"))
+                        )
+                )
+        ));
+    }
+
+    public void insertBDExtractColumns(List<BDExtractColumns> columns, SiteConfiguration site, String provider, JdbcTemplate biJdbcTemplate) {
+        List<Object[]> bdExtractColumnTempInsertArgs = new ArrayList<>();
+        for (BDExtractColumns column : columns) {
+            if (null != column && null != column.getName()) {
+                if (column.getName().toLowerCase().startsWith("w_")) {
+                    for (String step : site.getWorkflow()) {
+                        bdExtractColumnTempInsertArgs.add(new Object[] { column.getService().toLowerCase(), column.getName().toLowerCase() + "." + step, column.getProvider(),
+                                column.getDisplayName() + " " + step });
+                        if (site.isMultipleCurrencyProcessingEnable() && column.getDataType().equalsIgnoreCase(CURRENCY)) {
+                            for (String outputCurrency : site.getOutputCurrenciesForProcessing()) {
+                                if (outputCurrency.equalsIgnoreCase(SYSTEM)) {
+                                    bdExtractColumnTempInsertArgs.add(
+                                            new Object[] { column.getService().toLowerCase(), COSTINCURR_SITE + "." + column.getName().toLowerCase() + "." + step,
+                                                    column.getProvider(), SITE_CURR + column.getDisplayName() + " " + step });
+
+                                }
+                                else {
+                                    bdExtractColumnTempInsertArgs.add(new Object[] { column.getService().toLowerCase(),
+                                            COSTINCURR_ + outputCurrency.toUpperCase() + "." + column.getName().toLowerCase() + "." + step, column.getProvider(),
+                                            CURR + " " + outputCurrency.toUpperCase() + " " + column.getDisplayName() + " " + step });
+
+                                }
+                            }
+                        }
+                    }
+                }
+                else if (null != column.getDisplayName() && column.getDisplayName().toLowerCase().startsWith("c_")) {
+                    bdExtractColumnTempInsertArgs.add(
+                            new Object[] { column.getService().toLowerCase(), SQLStringEscapeUtil.escape(column.getName().toLowerCase()), column.getProvider(),
+                                    SQLStringEscapeUtil.escape(column.getDisplayName().substring(2)) });
+                }
+                else if (column.getName().toLowerCase().startsWith("r_")) {
+                    bdExtractColumnTempInsertArgs.add(new Object[] { column.getService().toLowerCase(), SQLStringEscapeUtil.escape(column.getName()), column.getProvider(),
+                            SQLStringEscapeUtil.escape(column.getDisplayName()) });
+                }
+                else {
+                    bdExtractColumnTempInsertArgs.add(
+                            new Object[] { column.getService().toLowerCase(), SQLStringEscapeUtil.escape(column.getName().toLowerCase()), column.getProvider(),
+                                    SQLStringEscapeUtil.escape(column.getDisplayName()) });
+                }
+            }
+        }
+        biJdbcTemplate.batchUpdate(BDSetupConstants.BD_EXTRACT_COLUMN_TEMP_INSERTS, bdExtractColumnTempInsertArgs);
+
+        List<Object[]> bdExtractColumnUpdateArgs = new ArrayList<>();
+        biJdbcTemplate.query(BDSetupConstants.BD_EXTRACT_SELECT_COLUMNS.replace("<TENANT>", provider), (rs) -> {
+            bdExtractColumnUpdateArgs.add(new Object[] { rs.getString("TEMP_NAME"), rs.getString("ID"), rs.getString("NAME") });
+        });
+
+        biJdbcTemplate.batchUpdate(BDSetupConstants.BD_EXTRACT_UPDATE, bdExtractColumnUpdateArgs);
+        biJdbcTemplate.update(BDSetupConstants.BD_EXTRACT_COLUMN_DELETES, provider);
+        biJdbcTemplate.update(BDSetupConstants.BD_EXTRACT_COLUMN_MERGE, provider);
+        insertLegoIPGAuthSFViewBDColumns(site);
+    }
+
+    public void insertLegoIPGAuthSFViewBDColumns(SiteConfiguration site) {
+        // Populates Currency Columns for LegoIPG authorized_sub_flight view
+        biJdbcTemplate.update(BDSetupConstants.BD_EXTRACT_LEGOIPG_AUTH_SF_CURRENCY_COLUMN_DELETES);
+        biJdbcTemplate.update(BDSetupConstants.BD_EXTRACT_COLUMN_TEMP_DELETE, "MMP");
+        boolean isProcessingNeededForMultiCurrency = site.isMultipleCurrencyProcessingEnable() && CollectionUtils.isNotEmpty(site.getOutputCurrenciesForProcessing());
+        if(site.getName().equalsIgnoreCase("LEGOIPG") && isProcessingNeededForMultiCurrency) {
+            List<Object[]> bdExtractColumnInsertArgs = new ArrayList<>();
+            List<String> currencyColumnsListForLegoipgSpecialView = new ArrayList<String>(Arrays.asList(CURRENCY_COLUMNS_FOR_LEGOIPG_AUTH_SUBFLIGHT_VIEW.replaceAll("\\s+", "").split("\\s*,\\s*")));
+            int bdExtractId = biJdbcTemplate.queryForObject(
+                    BDSetupConstants.SELECT_BD_EXTRACT_ID.replace("<SOURCE>", "mmp_dw_data").replace("<NAME>", "authorized_sub_flight").replace("<BD_DISPLAY_NAME>",
+                            "lego_ipg_auth_sub_flight"), Integer.class);
+            if(!currencyColumnsListForLegoipgSpecialView.isEmpty()) {
+                for (String currencyColumn : currencyColumnsListForLegoipgSpecialView) {
+                    String parameterName = currencyColumn.replace("_", " ");
+                    for (String outputCurrency : site.getOutputCurrenciesForProcessing()) {
+                        if (outputCurrency.equalsIgnoreCase(SYSTEM)) {
+                            bdExtractColumnInsertArgs.add(
+                                    new Object[] { "authorized_sub_flight", String.format(COSTINCURR_SITE + "_%s", currencyColumn), "MMP", SITE_CURR_V2 + parameterName});
+                        }
+                        else {
+                            bdExtractColumnInsertArgs.add(new Object[] { "authorized_sub_flight", String.format(COSTINCURR_ + outputCurrency + "_%s", currencyColumn), "MMP",
+                                    outputCurrency + CURR_V2 + parameterName});
+                        }
+                    }
+                }
+                biJdbcTemplate.batchUpdate(BDSetupConstants.BD_EXTRACT_COLUMN_TEMP_INSERTS, bdExtractColumnInsertArgs);
+                biJdbcTemplate.update(BDSetupConstants.BD_EXTRACT_COLUMN_MERGE, "MMP");
+            }
+        }
+    }
+
+}
