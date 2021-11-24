@@ -1,0 +1,14 @@
+package com.mediaocean.data.api.commons.type.dto;
+
+
+import org.codehaus.jackson.annotate.JsonPropertyOrder;
+import javax.xml.bind.annotation.XmlAccessType;
+import javax.xml.bind.annotation.XmlAccessorType;
+
+
+
+@XmlAccessorType(XmlAccessType.FIELD)
+@JsonPropertyOrder({"value", "detailId", "EarlyEndDate", "LateStartDate", "PlacementMonthlyStartDate", "PlacementMonthlyEndDate", "PlannedAmount",
+        "PlannedUnits", "PlannedImpressions", "PlannedClicks" ,"PlannedActions", "IOAmount", "ApprovedAmount", "ApprovedUnits","ApprovedSource", "OriginalAmount", "TotalRemainingAmount", "TotalRemainingUnits", "MediaPayable", "BillableCost", "ActualizedCost" , "PlannedFees" ,  "BillablePlannedFees",  "BillableActualizedCost",  "PlannedBillableUnits", "PlannedMargin" })
+public class DSPMonthDetail extends BaseMonthDetail {
+}
